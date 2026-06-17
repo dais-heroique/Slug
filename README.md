@@ -22,6 +22,7 @@ apps like **Firefox** and **gnome-text-editor** — no pixels required.
 | `slug-bridge` | The AT-SPI2 harvester (via the [`atspi`](https://crates.io/crates/atspi) crate): connects to the a11y bus, walks application trees, maps AT-SPI roles/states to Slug, executes actions, streams live events, and flags opaque (vision-fallback) apps. |
 | `slug-mcp`    | The MCP server: JSON-RPC 2.0 over **stdio** and **streamable HTTP**, exposing four tools. This is the session layer that maps internal ULID refs to short agent-facing aliases (`b1`, `e5`). |
 | `slug-cli`    | A `slug` binary for driving the bus by hand (snapshot, list apps, invoke actions, stream live events). |
+| `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools, switching between a local **Ollama** model and the **Anthropic Claude API** based on detected hardware. See [Agent: local vs cloud](#agent-slug-brain). |
 
 ```
 agent ──MCP──► slug-mcp ──► slug-bridge ──AT-SPI2/D-Bus──► applications
@@ -151,6 +152,75 @@ cargo test -p slug-bridge --test e2e_gnome_text_editor -- --ignored --nocapture
 
 It launches the editor, harvests its tree, asserts it is non-trivial and
 non-opaque, renders the agent-facing YAML, and focuses a button.
+
+## Agent (slug-brain)
+
+`slug-brain` turns the MCP tools into an autonomous **observe → reason → act →
+verify** loop, and chooses its inference backend from the machine's hardware.
+
+```sh
+slug-agent --probe                 # "Can I run it?" hardware report
+slug-agent --write-config          # print a default slug.toml
+slug-agent "open the Open dialog in the text editor"
+slug-agent --backend cloud "summarise the focused window"
+```
+
+Each step: the model reads the focused window via `slug_snapshot` (scope
+`focused` by default to keep context small — oversized accessibility snapshots
+are a well-known failure mode, so they're also truncated), acts via `slug_invoke`
+with a `reasoning` slot, and is handed a **fresh post-action snapshot** to verify
+expected vs. actual state before continuing.
+
+### Local vs cloud decision
+
+`slug-brain` detects total VRAM (NVIDIA via NVML, AMD via sysfs, Apple via
+`system_profiler`), system RAM, and CPU cores, then maps VRAM to a capability
+tier. With `selection = "auto"`, the cloud tier uses the Claude API and the local
+tiers use Ollama; `local` / `cloud` force a backend.
+
+| Tier | VRAM | Backend | Default model |
+|------|------|---------|---------------|
+| `TIER_CLOUD` | < 8 GB (or no GPU) | Claude API | `claude-sonnet-4-6` |
+| `TIER_LOCAL_SMALL` | 8–11 GB | Ollama | `qwen3:8b` (Q4_K_M) |
+| `TIER_LOCAL_STD` | 12–23 GB | Ollama | `qwen3:14b` (Q4_K_M) |
+| `TIER_LOCAL_LARGE` | ≥ 24 GB | Ollama | `qwen3:32b` (Q4_K_M) |
+
+This is the task's 4-tier scheme; it consolidates the A–G policy in
+[`docs/HARDWARE-TIERING.md`](./docs/HARDWARE-TIERING.md) (Doc 5). The tier →
+model/quant mapping and all caps are overridable in `slug.toml`. The cloud model
+defaults to `claude-sonnet-4-6` (Doc 5's `cloud_model`); switch to
+`claude-opus-4-8` by setting `cloud.model` in `slug.toml`.
+
+### Backends
+
+Both backends are driven with **identical tool schemas** behind one
+`LlmBackend` trait:
+
+- **`ClaudeBackend`** — Anthropic Messages API over raw HTTP (no official Rust
+  SDK). Implements the documented tool-use loop: send the `tools` array, and on
+  `stop_reason = "tool_use"` execute the `tool_use` blocks and append
+  `tool_result` blocks on the next turn.
+- **`OllamaBackend`** — Ollama `/api/chat` function-calling, with the same tools
+  wrapped in `{type:"function", …}` and tool results returned as `role:"tool"`.
+
+Set the Claude key via the env var named in `slug.toml` (`api_key_env`, default
+`ANTHROPIC_API_KEY`); run `ollama serve` and `ollama pull <model>` for local.
+
+### Safety
+
+- **Per-session caps** — token and (cloud) USD cost caps; when hit, the loop
+  stops and escalates to a human instead of continuing.
+- **Destructive-action confirmation** — `delete` / `send` / `purchase` /
+  `submit` / … are pattern-matched (against the action, argument, and the model's
+  stated reasoning) and gated behind a confirmation hook (`y/N` on the terminal;
+  auto-deny with `--non-interactive`).
+- **Structured action log** — every action is logged with its reasoning and
+  result, with best-effort **undo** of the last action (e.g. restore prior text,
+  re-toggle).
+
+`slug-brain` ships unit tests for the tiering logic (mocked probes) and a scripted
+backend that exercises the full loop, the caps, and the destructive gate without
+a network or a bus.
 
 ## Milestone-1 adaptations
 

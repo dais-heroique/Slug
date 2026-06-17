@@ -5,6 +5,7 @@ members = [
     "crates/slug-bridge",
     "crates/slug-mcp",
     "crates/slug-cli",
+    "crates/slug-brain",
 ]
 
 [workspace.package]
@@ -47,3 +48,9 @@ axum = "0.8"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+
+# slug-brain: HTTP client for Ollama + Anthropic, hardware probing, config
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
+toml = "1"
+nvml-wrapper = "0.12"
