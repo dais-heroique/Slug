@@ -1,0 +1,29 @@
+[package]
+name = "slug-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+slug-core = { workspace = true }
+slug-bridge = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+
+[[bin]]
+name = "slug-mcp"
+path = "src/main.rs"
+
+[lib]
+name = "slug_mcp"
+path = "src/lib.rs"

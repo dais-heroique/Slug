@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/slug-core",
+    "crates/slug-bridge",
+    "crates/slug-mcp",
+    "crates/slug-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dais-heroique/slug"
+authors = ["slug contributors"]
+
+[workspace.dependencies]
+# Local crates
+slug-core = { path = "crates/slug-core" }
+slug-bridge = { path = "crates/slug-bridge" }
+slug-mcp = { path = "crates/slug-mcp" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# AT-SPI2 (odilia-app)
+atspi = { version = "0.30", default-features = false, features = ["connection", "proxies", "tokio", "tracing"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+# HTTP transport for MCP
+axum = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive"] }

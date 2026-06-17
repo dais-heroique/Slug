@@ -1,0 +1,23 @@
+[package]
+name = "slug-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+slug-core = { workspace = true }
+slug-bridge = { workspace = true }
+slug-mcp = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+
+[[bin]]
+name = "slug"
+path = "src/main.rs"
