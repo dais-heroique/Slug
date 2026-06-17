@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Canonical Slug role. Faithful mirror of the §3.1 enumeration, including the
 /// AccessKit-only gaps, AT-SPI2-only gaps, and the five Slug extensions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SlugRole {
     Alert,
@@ -115,14 +115,9 @@ pub enum SlugRole {
     Tree,
     TreeItem,
     Window,
+    #[default]
     #[serde(other)]
     Unknown,
-}
-
-impl Default for SlugRole {
-    fn default() -> Self {
-        SlugRole::Unknown
-    }
 }
 
 impl SlugRole {

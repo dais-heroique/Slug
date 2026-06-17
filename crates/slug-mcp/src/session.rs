@@ -183,7 +183,11 @@ impl Session {
             loop {
                 match rx.recv().await {
                     Ok(ev) => {
-                        if event_type.is_none_or(|t| t == ev.type_name()) {
+                        let matches = match event_type {
+                            None => true,
+                            Some(t) => t == ev.type_name(),
+                        };
+                        if matches {
                             return Some(ev);
                         }
                     }

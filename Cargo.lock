@@ -1170,6 +1170,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 name = "slug-bridge"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "atspi",
  "futures",
  "serde",
@@ -1188,6 +1189,7 @@ dependencies = [
  "anyhow",
  "clap",
  "futures",
+ "serde_json",
  "slug-bridge",
  "slug-core",
  "slug-mcp",
