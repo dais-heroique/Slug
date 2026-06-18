@@ -8,8 +8,6 @@ repository.workspace = true
 
 [dependencies]
 slug-core = { workspace = true }
-atspi = { workspace = true }
-zbus = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
@@ -17,5 +15,33 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 
+# Linux: AT-SPI2 over D-Bus.
+[target.'cfg(target_os = "linux")'.dependencies]
+atspi = { workspace = true }
+zbus = { workspace = true }
+
+# Windows: UI Automation via the official Microsoft crate.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Variant",
+    "Win32_System_Ole",
+    "Win32_UI_Accessibility",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
+
+# macOS: the Accessibility (AX) API via the proven accessibility-sys FFI bindings
+# + the core-foundation safe wrappers.
+[target.'cfg(target_os = "macos")'.dependencies]
+accessibility-sys = "0.2"
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+
 [dev-dependencies]
 anyhow = { workspace = true }
+
+[features]
+# Gate live/runtime tests (need a real desktop + a11y permissions) per platform.
+live-tests = []

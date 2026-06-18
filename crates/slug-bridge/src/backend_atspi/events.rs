@@ -16,8 +16,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 
 use crate::error::Result;
-use crate::harvest::{obj_ref, read_node};
-use crate::mapping::{map_state, map_states};
+use super::harvest::{obj_ref, read_node};
+use super::mapping::{map_state, map_states};
 
 /// Subscribe to live AT-SPI object events and receive translated [`SlugEvent`]s.
 ///

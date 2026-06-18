@@ -1,160 +1,66 @@
 //! # slug-bridge
 //!
-//! The AT-SPI2 harvester: connects to the accessibility bus, walks application
-//! trees into a [`slug_core::SlugDocument`], executes actions, and streams live
-//! semantic events.
+//! The cross-platform accessibility harvester. It connects to the OS
+//! accessibility service, walks application trees into a [`slug_core::SlugDocument`],
+//! executes actions, and streams live semantic events — exposing one async API to
+//! `slug-mcp` regardless of platform.
 //!
-//! ## Milestone-1 adaptation (rule #2)
+//! ## Backends (M1.5)
+//!
+//! All platform-specific perception/action lives behind the
+//! [`AccessibilityBackend`] trait ([`backend`]); the [`Bridge`] facade selects one
+//! per `cfg(target_os)`:
+//!
+//! | OS | Module | Source |
+//! |----|--------|--------|
+//! | Linux | [`backend_atspi`] | AT-SPI2 over D-Bus (the original harvester) |
+//! | Windows | `backend_uia` | UI Automation (`IUIAutomation`) |
+//! | macOS | `backend_ax` | the Accessibility (AX) API (`AXUIElement`) |
+//!
+//! The semantic model (`slug-core`), the MCP server (`slug-mcp`), and the agent
+//! (`slug-brain`) are platform-agnostic and unchanged.
+//!
+//! ## Milestone-1 adaptations (carried forward)
 //!
 //! Live [`slug_core::SlugDelta`]/[`slug_core::SlugEvent`] frames are produced from
-//! AT-SPI2 signals (`StateChanged`, `ChildrenChanged`, focus) rather than Wayland
-//! frame commits — see [`events`]. Node refs are the step-1 derived ULIDs
-//! (`{unique_bus_name}:{accessible_path}`) minted in [`harvest`].
+//! native accessibility signals (not Wayland frame commits). Node refs are derived
+//! ULIDs hashed from each backend's native stable identity (brief §4); the agent
+//! only ever sees short session aliases.
 
-pub mod actions;
+pub mod action;
+pub mod backend;
 pub mod coverage;
 pub mod error;
-pub mod events;
-pub mod harvest;
-pub mod mapping;
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+#[cfg(target_os = "linux")]
+pub mod backend_atspi;
+#[cfg(target_os = "macos")]
+pub mod backend_ax;
+#[cfg(target_os = "windows")]
+pub mod backend_uia;
 
-use atspi::proxy::accessible::ObjectRefExt;
-use atspi::{AccessibilityConnection, ObjectRefOwned};
+use std::collections::HashSet;
+use std::sync::Mutex;
+
+use slug_core::{derive_ref, SlugDocument, SlugEvent};
 use serde::Serialize;
-use slug_core::{SlugDocument, SlugEvent};
 use tokio::sync::mpsc;
 use tracing::{info, instrument};
 
+pub use action::Action;
+pub use backend::{AccessibilityBackend, AppHandle, BackendNodeId, EventSink, Subscription};
 pub use coverage::{Coverage, OpaqueReason};
 pub use error::{BridgeError, Result};
-pub use harvest::Harvest;
 
-/// Summary of a running accessible application (from the registry).
+/// Summary of a running accessible application (returned to `slug-mcp`).
 #[derive(Clone, Debug, Serialize)]
 pub struct AppInfo {
-    /// Accessible name of the application (e.g. `gnome-text-editor`, `Firefox`).
+    /// Display name of the application (e.g. `Text Editor`, `Notepad`, `Finder`).
     pub app_id: String,
-    /// The application's stable Slug ref.
+    /// The application's stable Slug ref (derived ULID).
     pub app_ref: String,
-    /// The D-Bus unique name hosting the application.
+    /// The backend's native stable identity for the app (brief §4).
     pub bus_name: String,
-}
-
-/// The bridge to the AT-SPI2 accessibility bus.
-pub struct Bridge {
-    conn: AccessibilityConnection,
-    /// ref → AT-SPI object handle, refreshed on every harvest.
-    index: Arc<Mutex<HashMap<String, ObjectRefOwned>>>,
-}
-
-impl Bridge {
-    /// Connect to the running a11y bus. Enables accessibility for this session if
-    /// it is not already on.
-    pub async fn connect() -> Result<Self> {
-        // Best-effort: ask the session to enable a11y so toolkits expose trees.
-        if let Err(e) = atspi::connection::set_session_accessibility(true).await {
-            tracing::debug!(error = %e, "could not toggle session accessibility (continuing)");
-        }
-        let conn = AccessibilityConnection::new().await?;
-        info!("connected to AT-SPI accessibility bus");
-        Ok(Bridge { conn, index: Arc::new(Mutex::new(HashMap::new())) })
-    }
-
-    /// The underlying accessibility connection.
-    pub fn connection(&self) -> &AccessibilityConnection {
-        &self.conn
-    }
-
-    /// List the applications currently registered on the a11y bus.
-    pub async fn list_apps(&self) -> Result<Vec<AppInfo>> {
-        let root = self.conn.root_accessible_on_registry().await?;
-        let children = root.get_children().await?;
-        let mut apps = Vec::new();
-        for child in children {
-            if child.is_null() {
-                continue;
-            }
-            let app_ref = harvest::obj_ref(&child);
-            let bus_name = child.name_as_str().unwrap_or("").to_string();
-            let app_id = match child.as_accessible_proxy(self.conn.connection()).await {
-                Ok(p) => p.name().await.unwrap_or_default(),
-                Err(_) => String::new(),
-            };
-            apps.push(AppInfo { app_id, app_ref, bus_name });
-        }
-        Ok(apps)
-    }
-
-    /// Harvest the entire desktop (all applications) into a fresh document and
-    /// refresh the internal action index.
-    #[instrument(skip(self))]
-    pub async fn snapshot_desktop(&self) -> Result<SnapshotResult> {
-        let harvest = harvest::harvest_desktop(&self.conn).await?;
-        Ok(self.commit_harvest(harvest))
-    }
-
-    /// Harvest a single application subtree by its bus name.
-    #[instrument(skip(self))]
-    pub async fn snapshot_app(&self, bus_name: &str) -> Result<SnapshotResult> {
-        let root = self.conn.root_accessible_on_registry().await?;
-        let children = root.get_children().await?;
-        let app = children
-            .into_iter()
-            .find(|c| c.name_as_str() == Some(bus_name))
-            .ok_or_else(|| BridgeError::UnknownRef(bus_name.to_string()))?;
-        let harvest = harvest::harvest_apps(self.conn.connection(), &[app]).await?;
-        Ok(self.commit_harvest(harvest))
-    }
-
-    /// Store a harvest's index and return the document + coverage to the caller.
-    fn commit_harvest(&self, harvest: Harvest) -> SnapshotResult {
-        let opaque: Vec<Coverage> =
-            harvest.coverage.iter().filter(|c| c.is_opaque()).cloned().collect();
-        {
-            let mut idx = self.index.lock().expect("index mutex poisoned");
-            // Merge rather than replace so refs from other scopes remain valid.
-            idx.extend(harvest.index);
-        }
-        SnapshotResult { document: harvest.document, coverage: harvest.coverage, opaque }
-    }
-
-    /// Execute an action on a node identified by its (internal) Slug ref.
-    ///
-    /// `verb` is an action verb (`click`, `set_text`, `set_value`, `focus`, …);
-    /// `arg` is its optional argument; `reasoning` is the agent's rationale, which
-    /// is logged with the action.
-    #[instrument(skip(self), fields(reasoning = reasoning.unwrap_or("")))]
-    pub async fn invoke(
-        &self,
-        slug_ref: &str,
-        verb: &str,
-        arg: Option<&str>,
-        reasoning: Option<&str>,
-    ) -> Result<bool> {
-        let objref = {
-            let idx = self.index.lock().expect("index mutex poisoned");
-            idx.get(slug_ref).cloned()
-        }
-        .ok_or_else(|| BridgeError::UnknownRef(slug_ref.to_string()))?;
-
-        let action = actions::Action::parse(verb, arg)?;
-        actions::invoke(self.conn.connection(), &objref, &action, reasoning).await
-    }
-
-    /// Subscribe to live semantic events. Opens a dedicated accessibility
-    /// connection for the subscription so harvesting and eventing don't contend.
-    pub async fn subscribe(&self) -> Result<mpsc::Receiver<SlugEvent>> {
-        let conn = AccessibilityConnection::new().await?;
-        events::subscribe(conn).await
-    }
-
-    /// Whether a ref is currently known to the action index.
-    pub fn knows_ref(&self, slug_ref: &str) -> bool {
-        self.index.lock().expect("index mutex poisoned").contains_key(slug_ref)
-    }
 }
 
 /// The result of a harvest exposed to callers.
@@ -165,4 +71,152 @@ pub struct SnapshotResult {
     pub coverage: Vec<Coverage>,
     /// Just the applications flagged opaque (vision-fallback candidates).
     pub opaque: Vec<Coverage>,
+}
+
+/// The platform-neutral bridge to the OS accessibility service.
+///
+/// Public API is identical across platforms and unchanged from M1, so `slug-mcp`
+/// is platform-agnostic.
+pub struct Bridge {
+    backend: Box<dyn AccessibilityBackend>,
+    /// Refs known from the most recent snapshots (for [`Bridge::knows_ref`]).
+    known: Mutex<HashSet<String>>,
+    /// Live subscriptions kept alive for the Bridge's lifetime.
+    subs: Mutex<Vec<Subscription>>,
+}
+
+impl Bridge {
+    /// Connect to the platform accessibility backend.
+    pub async fn connect() -> Result<Self> {
+        let backend = select_backend().await?;
+        info!(backend = backend.label(), "accessibility backend ready");
+        Ok(Bridge {
+            backend,
+            known: Mutex::new(HashSet::new()),
+            subs: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// List the applications currently exposing an accessibility tree.
+    pub async fn list_apps(&self) -> Result<Vec<AppInfo>> {
+        let apps = self.backend.enumerate_apps().await?;
+        Ok(apps
+            .into_iter()
+            .map(|a| AppInfo {
+                app_ref: derive_ref(&a.backend_node_id),
+                app_id: a.app_id,
+                bus_name: a.backend_node_id,
+            })
+            .collect())
+    }
+
+    /// Harvest the entire desktop (all applications) into a fresh document.
+    #[instrument(skip(self))]
+    pub async fn snapshot_desktop(&self) -> Result<SnapshotResult> {
+        let apps = self.backend.enumerate_apps().await?;
+        self.snapshot_apps(&apps).await
+    }
+
+    /// Harvest a single application by name / native id / ref.
+    #[instrument(skip(self))]
+    pub async fn snapshot_app(&self, app_key: &str) -> Result<SnapshotResult> {
+        let apps = self.backend.enumerate_apps().await?;
+        let app = apps
+            .into_iter()
+            .find(|a| {
+                a.backend_node_id == app_key
+                    || a.app_id == app_key
+                    || derive_ref(&a.backend_node_id) == app_key
+            })
+            .ok_or_else(|| BridgeError::UnknownRef(app_key.to_string()))?;
+        self.snapshot_apps(&[app]).await
+    }
+
+    /// Snapshot a set of apps into one document, recording known refs + coverage.
+    async fn snapshot_apps(&self, apps: &[AppHandle]) -> Result<SnapshotResult> {
+        let mut doc = SlugDocument::new();
+        let mut coverage = Vec::new();
+
+        for app in apps {
+            let nodes = match self.backend.snapshot_app(app).await {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!(app = %app.app_id, error = %e, "failed to snapshot app; skipping");
+                    continue;
+                }
+            };
+            {
+                let mut known = self.known.lock().expect("known mutex poisoned");
+                for n in &nodes {
+                    known.insert(n.slug_ref.clone());
+                }
+            }
+            for n in nodes {
+                doc.insert(n);
+            }
+            coverage.push(self.backend.coverage(app));
+        }
+
+        doc.recompute_roots();
+        let opaque: Vec<Coverage> = coverage.iter().filter(|c| c.is_opaque()).cloned().collect();
+        Ok(SnapshotResult { document: doc, coverage, opaque })
+    }
+
+    /// Execute an action on a node identified by its (internal) Slug ref.
+    ///
+    /// `verb` is an action verb (`click`, `set_text`, `set_value`, `focus`, …);
+    /// `arg` is its optional argument; `reasoning` is the agent's rationale, logged
+    /// with the action (structured-logging requirement).
+    #[instrument(skip(self), fields(reasoning = reasoning.unwrap_or("")))]
+    pub async fn invoke(
+        &self,
+        slug_ref: &str,
+        verb: &str,
+        arg: Option<&str>,
+        reasoning: Option<&str>,
+    ) -> Result<bool> {
+        let action = Action::parse(verb, arg)?;
+        info!(%slug_ref, action = %action.id(), "invoke");
+        self.backend.invoke(&BackendNodeId(slug_ref.to_string()), &action).await?;
+        Ok(true)
+    }
+
+    /// Subscribe to live semantic events. The subscription is kept alive for the
+    /// lifetime of the Bridge; dropping the returned receiver stops delivery.
+    pub async fn subscribe(&self) -> Result<mpsc::Receiver<SlugEvent>> {
+        let (tx, rx) = mpsc::channel::<SlugEvent>(256);
+        let sub = self.backend.subscribe_events(EventSink::new(tx)).await?;
+        self.subs.lock().expect("subs mutex poisoned").push(sub);
+        Ok(rx)
+    }
+
+    /// Whether a ref is currently known from a recent snapshot.
+    pub fn knows_ref(&self, slug_ref: &str) -> bool {
+        self.known.lock().expect("known mutex poisoned").contains(slug_ref)
+    }
+
+    /// The active backend's short label (`atspi` / `uia` / `ax`).
+    pub fn backend_label(&self) -> &'static str {
+        self.backend.label()
+    }
+}
+
+/// Construct the accessibility backend for the current platform.
+async fn select_backend() -> Result<Box<dyn AccessibilityBackend>> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(Box::new(backend_atspi::AtspiBackend::connect().await?))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Ok(Box::new(backend_uia::UiaBackend::new()?))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(backend_ax::AxBackend::new()?))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    {
+        Err(BridgeError::Unsupported(std::env::consts::OS.to_string()))
+    }
 }

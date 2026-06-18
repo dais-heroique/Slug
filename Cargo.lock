@@ -3,6 +3,15 @@
 version = 3
 
 [[package]]
+name = "accessibility-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46a6a8e90a1d8b96a48249e7c8f5b4058447bea8847280db7bfccb6dcab6b8e1"
+dependencies = [
+ "core-foundation-sys",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1969,8 +1978,11 @@ dependencies = [
 name = "slug-bridge"
 version = "0.1.0"
 dependencies = [
+ "accessibility-sys",
  "anyhow",
  "atspi",
+ "core-foundation",
+ "core-foundation-sys",
  "futures",
  "serde",
  "slug-core",
@@ -1978,6 +1990,8 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "windows",
+ "windows-core",
  "zbus",
 ]
 
