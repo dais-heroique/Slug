@@ -17,7 +17,7 @@ use slug_core::{
 use tracing::{debug, trace, warn};
 
 use crate::error::Result;
-use crate::mapping::{map_role, map_states, refine_role};
+use super::mapping::{map_role, map_states, refine_role};
 
 /// Safety limits so a pathological tree can never hang the harvester.
 const MAX_DEPTH: usize = 60;
@@ -222,6 +222,14 @@ pub(crate) fn obj_ref(objref: &ObjectRefOwned) -> String {
     let bus = objref.name_as_str().unwrap_or("");
     let path = objref.path_as_str();
     derive_ref_from_atspi(bus, path)
+}
+
+/// The platform-native stable identity for an object (brief §4): the raw
+/// `{unique_bus_name}:{accessible_path}` string the ULID ref is hashed from.
+pub(crate) fn native_id(objref: &ObjectRefOwned) -> String {
+    let bus = objref.name_as_str().unwrap_or("");
+    let path = objref.path_as_str();
+    format!("{bus}:{path}")
 }
 
 /// Normalise an AT-SPI action name into a stable Slug action id.
