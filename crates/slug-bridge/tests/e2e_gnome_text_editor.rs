@@ -1,6 +1,11 @@
 //! End-to-end test against a real GTK4 app (gnome-text-editor) over a live
 //! AT-SPI2 bus.
 //!
+//! Gated behind the `live-tests` feature (and Linux) so default `cargo test` and
+//! the CI matrix never build/run it without a desktop. Run on a real session:
+//! `cargo test -p slug-bridge --features live-tests --test e2e_gnome_text_editor -- --ignored --nocapture`
+#![cfg(all(target_os = "linux", feature = "live-tests"))]
+//!
 //! This test is `#[ignore]`d by default because it needs a running graphical
 //! session with the accessibility bus enabled and `gnome-text-editor` installed.
 //! Run it explicitly on such a machine:

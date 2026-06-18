@@ -33,11 +33,14 @@ windows = { version = "0.62", features = [
 windows-core = "0.62"
 
 # macOS: the Accessibility (AX) API via the proven accessibility-sys FFI bindings
-# + the core-foundation safe wrappers.
+# + the core-foundation safe wrappers; objc2 AppKit for running-app enumeration.
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility-sys = "0.2"
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSEnumerator"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication"] }
 
 [dev-dependencies]
 anyhow = { workspace = true }
