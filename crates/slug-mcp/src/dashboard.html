@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Slug — Control Dashboard</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         background: #0d1117; color: #c9d1d9; }
+  header { padding: 14px 20px; background: #161b22; border-bottom: 1px solid #30363d; }
+  header h1 { margin: 0 0 4px; font-size: 16px; }
+  .banner { color: #58a6ff; font-weight: 600; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #21262d;
+          border: 1px solid #30363d; margin-right: 6px; font-size: 12px; }
+  .pill.running { color: #3fb950; border-color: #238636; }
+  .pill.paused  { color: #d29922; border-color: #9e6a03; }
+  .pill.stopped, .pill.error { color: #f85149; border-color: #b62324; }
+  .pill.done    { color: #58a6ff; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 0; height: calc(100vh - 132px); }
+  section { overflow: auto; padding: 12px 16px; }
+  section.tree { border-right: 1px solid #30363d; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #8b949e; margin: 0 0 8px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .log div { padding: 1px 0; border-bottom: 1px solid #161b22; }
+  .err { color: #f85149; }
+  form { display: flex; gap: 8px; padding: 12px 20px; background: #161b22; border-top: 1px solid #30363d; }
+  input { flex: 1; padding: 8px 10px; background: #0d1117; color: #c9d1d9;
+          border: 1px solid #30363d; border-radius: 6px; font: inherit; }
+  button { padding: 8px 14px; background: #238636; color: #fff; border: 0; border-radius: 6px;
+           font: inherit; cursor: pointer; }
+  button.ghost { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Slug — Control Dashboard</h1>
+  <div class="banner">Slug never captures pixels. Everything below is the same structured text the agent reads.</div>
+  <div style="margin-top:8px">
+    <span id="status" class="pill">idle</span>
+    <span id="provider" class="pill"></span>
+    <span id="tier" class="pill"></span>
+    <span id="task" class="pill"></span>
+    <button class="ghost" onclick="ctl('slug_agent_pause')">Pause</button>
+    <button class="ghost" onclick="ctl('slug_agent_resume')">Resume</button>
+    <button class="ghost" onclick="ctl('slug_agent_stop')">Stop</button>
+  </div>
+</header>
+
+<main>
+  <section class="tree">
+    <h2>Semantic tree (slug_snapshot — text, never a screenshot)</h2>
+    <pre id="tree">(loading…)</pre>
+  </section>
+  <section>
+    <h2>Agent reasoning / action log</h2>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+
+<form onsubmit="startTask(event)">
+  <input id="taskInput" placeholder="Describe a task for the agent, e.g. 'open the Open dialog and pick README'" />
+  <button type="submit">Start task</button>
+</form>
+
+<script>
+let rpcId = 0;
+async function callTool(name, args = {}) {
+  const res = await fetch('/mcp', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call',
+                           params: { name, arguments: args } }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message);
+  const block = json.result && json.result.content && json.result.content[0];
+  return { text: block ? block.text : '', isError: !!(json.result && json.result.isError) };
+}
+
+function setPill(id, text, cls) {
+  const el = document.getElementById(id);
+  el.textContent = text || '';
+  el.className = 'pill' + (cls ? ' ' + cls : '');
+  el.style.display = text ? '' : 'none';
+}
+
+async function refresh() {
+  // 1. Agent status (task, provider/tier, last 20 log lines).
+  try {
+    const { text } = await callTool('slug_agent_status');
+    const s = JSON.parse(text);
+    setPill('status', s.status, s.status);
+    setPill('provider', s.provider ? 'provider: ' + s.provider : '');
+    setPill('tier', s.tier ? s.tier : '');
+    setPill('task', s.task ? 'task: ' + s.task : '');
+    const log = document.getElementById('log');
+    log.innerHTML = '';
+    (s.log || []).forEach(line => {
+      const d = document.createElement('div');
+      if (line.includes('[ERROR]') || line.startsWith('·')) d.className = 'err';
+      d.textContent = line;
+      log.appendChild(d);
+    });
+  } catch (e) {
+    setPill('status', 'mcp error', 'error');
+  }
+  // 2. The same semantic tree the agent reads — rendered as text.
+  try {
+    const { text } = await callTool('slug_snapshot', { scope: 'focused' });
+    document.getElementById('tree').textContent = text || '(empty)';
+  } catch (e) {
+    document.getElementById('tree').textContent = 'snapshot error: ' + e.message;
+  }
+}
+
+async function startTask(ev) {
+  ev.preventDefault();
+  const input = document.getElementById('taskInput');
+  const desc = input.value.trim();
+  if (!desc) return;
+  try { await callTool('slug_agent_start_task', { description: desc }); input.value = ''; }
+  catch (e) { alert('Could not start task: ' + e.message); }
+  refresh();
+}
+
+async function ctl(name) {
+  try { await callTool(name); } catch (e) { /* ignore */ }
+  refresh();
+}
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

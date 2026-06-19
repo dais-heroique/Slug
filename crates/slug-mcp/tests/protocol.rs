@@ -27,20 +27,41 @@ async fn initialize_advertises_tools_capability() {
 }
 
 #[tokio::test]
-async fn tools_list_exposes_the_four_tools() {
+async fn tools_list_exposes_the_perception_and_agent_tools() {
     let session = Session::new();
     let resp = handle(&session, req(2, "tools/list", json!({}))).await.expect("response");
     let v = serde_json::to_value(&resp).unwrap();
     let tools = v["result"]["tools"].as_array().expect("tools array");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names.len(), 4);
+    // The four perception/action tools …
     for expected in ["slug_snapshot", "slug_invoke", "slug_wait_for", "slug_list_apps"] {
         assert!(names.contains(&expected), "missing tool {expected}");
+    }
+    // … plus the M2.5 agent-control tools.
+    for expected in [
+        "slug_agent_start_task",
+        "slug_agent_status",
+        "slug_agent_pause",
+        "slug_agent_resume",
+        "slug_agent_stop",
+    ] {
+        assert!(names.contains(&expected), "missing agent tool {expected}");
     }
     // Every tool must publish a JSON-Schema object input schema.
     for t in tools {
         assert_eq!(t["inputSchema"]["type"], "object", "tool {} schema", t["name"]);
     }
+}
+
+#[tokio::test]
+async fn snapshot_tool_clarifies_it_is_not_a_screenshot() {
+    let session = Session::new();
+    let resp = handle(&session, req(3, "tools/list", json!({}))).await.expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    let tools = v["result"]["tools"].as_array().unwrap();
+    let snap = tools.iter().find(|t| t["name"] == "slug_snapshot").unwrap();
+    let desc = snap["description"].as_str().unwrap();
+    assert!(desc.contains("NOT a screenshot"), "snapshot must disclaim screenshots");
 }
 
 #[tokio::test]

@@ -92,10 +92,89 @@ impl Default for SafetyCfg {
     }
 }
 
+/// A provider choice for `[brain] provider`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    /// Pick a provider from the hardware tier (cloud → claude, local → ollama).
+    #[default]
+    Auto,
+    Claude,
+    Openai,
+    Openrouter,
+    Gemini,
+    Ollama,
+}
+
+/// Per-provider settings. API keys are read from the env var named here and are
+/// **never** stored in the file.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderCfg {
+    /// Environment variable holding the API key (empty for keyless local servers).
+    pub api_key_env: String,
+    /// API base URL (ignored by `claude`; the API root for the others).
+    pub base_url: String,
+    /// Model id; empty → use the hardware tier's recommendation.
+    pub model: String,
+}
+
+impl ProviderCfg {
+    fn make(api_key_env: &str, base_url: &str, model: &str) -> Self {
+        ProviderCfg { api_key_env: api_key_env.into(), base_url: base_url.into(), model: model.into() }
+    }
+}
+
+impl Default for ProviderCfg {
+    fn default() -> Self {
+        ProviderCfg::make("", "", "")
+    }
+}
+
+/// All provider blocks (`[providers.X]`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProvidersCfg {
+    pub claude: ProviderCfg,
+    pub openai: ProviderCfg,
+    pub openrouter: ProviderCfg,
+    pub gemini: ProviderCfg,
+    pub ollama: ProviderCfg,
+}
+
+impl Default for ProvidersCfg {
+    fn default() -> Self {
+        ProvidersCfg {
+            claude: ProviderCfg::make("ANTHROPIC_API_KEY", "", "claude-sonnet-4-6"),
+            openai: ProviderCfg::make("OPENAI_API_KEY", "https://api.openai.com/v1", "gpt-4o"),
+            openrouter: ProviderCfg::make(
+                "OPENROUTER_API_KEY",
+                "https://openrouter.ai/api/v1",
+                "openai/gpt-4o",
+            ),
+            gemini: ProviderCfg::make(
+                "GEMINI_API_KEY",
+                "https://generativelanguage.googleapis.com",
+                "gemini-2.0-flash",
+            ),
+            ollama: ProviderCfg::make("", "http://127.0.0.1:11434", ""),
+        }
+    }
+}
+
+/// `[brain]` — top-level provider selection.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BrainCfg {
+    pub provider: Provider,
+}
+
 /// The full configuration.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub brain: BrainCfg,
+    pub providers: ProvidersCfg,
     pub backend: BackendCfg,
     pub local: LocalCfg,
     pub cloud: CloudCfg,
@@ -117,6 +196,38 @@ impl Config {
     /// Serialize to a TOML string (for `--write-config`).
     pub fn to_toml(&self) -> String {
         toml::to_string_pretty(self).unwrap_or_default()
+    }
+
+    /// Canonical `(api_key_env, base_url)` fallback for a provider — used to fill
+    /// empty fields when a user writes a partial `[providers.X]` block.
+    pub fn provider_defaults(p: Provider) -> (&'static str, &'static str) {
+        match p {
+            Provider::Claude => ("ANTHROPIC_API_KEY", ""),
+            Provider::Openai => ("OPENAI_API_KEY", "https://api.openai.com/v1"),
+            Provider::Openrouter => ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+            Provider::Gemini => ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com"),
+            Provider::Ollama => ("", "http://127.0.0.1:11434"),
+            Provider::Auto => ("", ""),
+        }
+    }
+
+    /// The provider block with empty `api_key_env`/`base_url` filled from the
+    /// canonical defaults, so partial config blocks still work.
+    pub fn resolved_provider(&self, p: Provider) -> ProviderCfg {
+        let block = match p {
+            Provider::Claude => &self.providers.claude,
+            Provider::Openai => &self.providers.openai,
+            Provider::Openrouter => &self.providers.openrouter,
+            Provider::Gemini => &self.providers.gemini,
+            Provider::Ollama | Provider::Auto => &self.providers.ollama,
+        }
+        .clone();
+        let (env, url) = Self::provider_defaults(p);
+        ProviderCfg {
+            api_key_env: if block.api_key_env.is_empty() { env.to_string() } else { block.api_key_env },
+            base_url: if block.base_url.is_empty() { url.to_string() } else { block.base_url },
+            model: block.model,
+        }
     }
 }
 
@@ -146,5 +257,30 @@ mod tests {
     fn missing_file_is_defaults() {
         let cfg = Config::load(Path::new("/nonexistent/slug.toml")).unwrap();
         assert_eq!(cfg.backend.selection, Selection::Auto);
+    }
+
+    #[test]
+    fn provider_defaults_and_parsing() {
+        // Default provider is Auto, and every provider block has sane defaults.
+        let cfg = Config::default();
+        assert_eq!(cfg.brain.provider, Provider::Auto);
+        assert_eq!(cfg.providers.openai.base_url, "https://api.openai.com/v1");
+        assert_eq!(cfg.providers.openrouter.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(cfg.providers.gemini.api_key_env, "GEMINI_API_KEY");
+        assert!(cfg.providers.ollama.api_key_env.is_empty());
+
+        // A user can select a provider and override one block.
+        let cfg: Config = toml::from_str(
+            "[brain]\nprovider = \"openrouter\"\n[providers.openrouter]\nmodel = \"anthropic/claude-3.5-sonnet\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.brain.provider, Provider::Openrouter);
+        assert_eq!(cfg.providers.openrouter.model, "anthropic/claude-3.5-sonnet");
+        // A partial block resets siblings to empty at the serde layer, but
+        // `resolved_provider` fills them from the canonical defaults.
+        let resolved = cfg.resolved_provider(Provider::Openrouter);
+        assert_eq!(resolved.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(resolved.api_key_env, "OPENROUTER_API_KEY");
+        assert_eq!(resolved.model, "anthropic/claude-3.5-sonnet");
     }
 }

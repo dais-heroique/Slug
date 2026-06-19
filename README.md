@@ -32,7 +32,7 @@ semantic model (`slug-core`), the MCP server (`slug-mcp`), and the agent
 | `slug-bridge` | The cross-platform accessibility harvester. One `AccessibilityBackend` trait with three implementations — `backend_atspi` (Linux/AT-SPI2), `backend_uia` (Windows/UI Automation), `backend_ax` (macOS/AX) — selected per `cfg(target_os)`. Walks application trees, maps native roles/states to Slug, executes actions, and flags opaque (vision-fallback) apps. |
 | `slug-mcp`    | The MCP server: JSON-RPC 2.0 over **stdio** and **streamable HTTP**, exposing four tools. This is the session layer that maps internal ULID refs to short agent-facing aliases (`b1`, `e5`). |
 | `slug-cli`    | A `slug` binary for driving the bus by hand (snapshot, list apps, invoke actions, stream live events). |
-| `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools, switching between a local **Ollama** model and the **Anthropic Claude API** based on detected hardware. See [Agent: local vs cloud](#agent-slug-brain). |
+| `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools. **Multi-provider**: Claude, OpenAI/OpenRouter/any OpenAI-compatible server, Gemini, or local Ollama — chosen in `slug.toml` or auto-selected from detected hardware. See [Providers](#providers-multi-provider-brain). |
 
 ```
 agent ──MCP──► slug-mcp ──► slug-bridge ──AT-SPI2 / UIA / AX──► applications
@@ -140,6 +140,9 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 | `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action. |
 | `slug_wait_for` | `{ "event_type"?: "focus_changed" \| …, "timeout_ms": 5000 }` | Blocks until a live UI event occurs or the timeout elapses. |
 | `slug_list_apps` | `{}` | Lists running applications exposing an accessibility tree. |
+| `slug_agent_start_task` | `{ "description": "…" }` | Starts the `slug-brain` agent on a task (see [Control dashboard](#mcp-native-control-dashboard)). |
+| `slug_agent_status` | `{}` | Current task, status, active provider/tier/model, last 20 reasoning/action log lines. |
+| `slug_agent_pause` / `slug_agent_resume` / `slug_agent_stop` | `{}` | Pause / resume / stop the running agent task. |
 
 Tool **execution** failures are returned inside the result object
 (`isError: true`), never as JSON-RPC protocol errors.
@@ -153,6 +156,20 @@ Example snapshot output:
   - entry "Document name" [ref=i1] [focused]
     - text "untitled" [ref=e2]
 ```
+
+## Why `slug_snapshot` is not a screenshot
+
+The name *snapshot* means a **point-in-time read of the semantic document**, in the
+database sense — not an image. A `slug_snapshot` returns text (YAML): for each
+element its **role, name, state, and `ref`**. There is **no image, pixel buffer,
+screen capture, or OCR anywhere in the pipeline** — the bridge reads the OS
+accessibility tree (AT-SPI2 / UIA / AX) directly, and the agent acts on `ref`s.
+
+This is the whole thesis: the agent perceives structured meaning, not pixels.
+It's cheaper, deterministic, and legible — the [control dashboard](#mcp-native-control-dashboard)
+renders the *exact same text* the agent reads, so a human supervising the agent
+sees no screenshots either. (This note is mirrored in the `slug_snapshot` MCP
+tool description so MCP clients see it too.)
 
 ## Connect Claude Code
 
@@ -275,20 +292,48 @@ model/quant mapping and all caps are overridable in `slug.toml`. The cloud model
 defaults to `claude-sonnet-4-6` (Doc 5's `cloud_model`); switch to
 `claude-opus-4-8` by setting `cloud.model` in `slug.toml`.
 
-### Backends
+### Providers (multi-provider brain)
 
-Both backends are driven with **identical tool schemas** behind one
-`LlmBackend` trait:
+All providers are driven with **identical tool schemas** behind one `LlmBackend`
+trait. Select one in `slug.toml`; keys are read from env vars named in the config
+and are **never stored in the file**:
 
-- **`ClaudeBackend`** — Anthropic Messages API over raw HTTP (no official Rust
-  SDK). Implements the documented tool-use loop: send the `tools` array, and on
-  `stop_reason = "tool_use"` execute the `tool_use` blocks and append
-  `tool_result` blocks on the next turn.
-- **`OllamaBackend`** — Ollama `/api/chat` function-calling, with the same tools
-  wrapped in `{type:"function", …}` and tool results returned as `role:"tool"`.
+```toml
+[brain]
+provider = "claude"   # auto | claude | openai | openrouter | gemini | ollama
 
-Set the Claude key via the env var named in `slug.toml` (`api_key_env`, default
-`ANTHROPIC_API_KEY`); run `ollama serve` and `ollama pull <model>` for local.
+[providers.claude]     # api_key_env defaults shown; model overridable
+api_key_env = "ANTHROPIC_API_KEY"
+model = "claude-sonnet-4-6"
+
+[providers.openai]     # also drives any OpenAI-compatible server (vLLM, LM Studio, llama.cpp)
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1"
+model = "gpt-4o"
+
+[providers.openrouter]
+api_key_env = "OPENROUTER_API_KEY"
+base_url = "https://openrouter.ai/api/v1"
+model = "openai/gpt-4o"
+
+[providers.gemini]
+api_key_env = "GEMINI_API_KEY"
+model = "gemini-2.0-flash"
+
+[providers.ollama]
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:8b"
+```
+
+| Provider | Implementation | Endpoint |
+|----------|----------------|----------|
+| `claude` | `ClaudeBackend` | Anthropic Messages API (`tool_use` loop) |
+| `openai` / `openrouter` / local | `OpenAiCompatibleBackend` | `POST {base_url}/chat/completions` with `tools`; parses `tool_calls` |
+| `gemini` | `GeminiBackend` | `generateContent`; tools as `function_declarations`, parses `functionCall` parts |
+| `ollama` | `OllamaBackend` | `/api/chat` function-calling |
+
+With `provider = "auto"` the hardware tier decides (cloud → claude, local →
+ollama). The `--probe` report recommends a provider too.
 
 ### Safety
 
@@ -305,6 +350,43 @@ Set the Claude key via the env var named in `slug.toml` (`api_key_env`, default
 `slug-brain` ships unit tests for the tiering logic (mocked probes) and a scripted
 backend that exercises the full loop, the caps, and the destructive gate without
 a network or a bus.
+
+## MCP-native control dashboard
+
+A human can supervise and drive the agent through the **same MCP transport** — no
+separate protocol. `slug-mcp` exposes agent-control tools (`slug_agent_start_task`,
+`slug_agent_status`, `slug_agent_pause`, `slug_agent_resume`, `slug_agent_stop`),
+and serves a tiny static dashboard at **`GET /dashboard`** (when run with
+`--http`). The dashboard:
+
+- polls `slug_agent_status` every second (task, provider/tier/model, last 20
+  reasoning/action lines);
+- renders the live semantic tree from `slug_snapshot` **as text** — the exact
+  hierarchy the agent reads;
+- has a text box that calls `slug_agent_start_task`.
+
+Its header states, verbatim: *“Slug never captures pixels. Everything below is the
+same structured text the agent reads.”*
+
+```sh
+slug-mcp --http 127.0.0.1:7333      # then open http://127.0.0.1:7333/dashboard
+```
+
+To avoid a crate cycle (`slug-brain` depends on `slug-mcp`), the controller drives
+`slug-agent --jsonl` as a child process and parses its JSON-lines event stream; set
+`SLUG_AGENT_BIN` if it isn't installed next to `slug-mcp`.
+
+## Install (macOS)
+
+```sh
+./slug-install/install.sh
+```
+
+Builds the Rust binaries (a few MB — **no models are downloaded**), writes a
+starter `~/.slug/slug.toml` (defaulting to `ollama` if detected, else `claude`),
+and registers a launchd agent that runs `slug-mcp --http` at login with the
+dashboard. See [`slug-install/README.md`](./slug-install/README.md) (Windows is a
+documented manual path for now).
 
 ## Milestone-1 adaptations
 

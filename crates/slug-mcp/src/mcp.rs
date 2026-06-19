@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
+use crate::agent::AgentController;
 use crate::session::{Scope, Session};
 
 /// The MCP protocol revision we advertise.
@@ -61,8 +62,20 @@ impl JsonRpcResponse {
     }
 }
 
-/// Handle a single JSON-RPC message. Returns `None` for notifications (no reply).
+/// Handle a single JSON-RPC message (no agent controller — used by `slug-brain`'s
+/// in-process tool dispatch). Returns `None` for notifications.
 pub async fn handle(session: &Arc<Session>, req: JsonRpcRequest) -> Option<JsonRpcResponse> {
+    handle_with_control(session, None, req).await
+}
+
+/// Handle a JSON-RPC message, optionally with an [`AgentController`] so the
+/// agent-control tools are available (the `slug-mcp` daemon passes one; the
+/// in-process `slug-brain` path passes `None`).
+pub async fn handle_with_control(
+    session: &Arc<Session>,
+    control: Option<Arc<AgentController>>,
+    req: JsonRpcRequest,
+) -> Option<JsonRpcResponse> {
     debug!(method = %req.method, "rpc request");
     let is_notification = req.id.is_none();
     let id = req.id.clone().unwrap_or(Value::Null);
@@ -72,7 +85,7 @@ pub async fn handle(session: &Arc<Session>, req: JsonRpcRequest) -> Option<JsonR
         "notifications/initialized" | "notifications/cancelled" => return None,
         "ping" => JsonRpcResponse::ok(id, json!({})),
         "tools/list" => JsonRpcResponse::ok(id, json!({ "tools": tool_definitions() })),
-        "tools/call" => match handle_tool_call(session, req.params).await {
+        "tools/call" => match handle_tool_call(session, control.as_ref(), req.params).await {
             Ok(result) => JsonRpcResponse::ok(id, result),
             Err(code_msg) => JsonRpcResponse::err(id, code_msg.0, code_msg.1),
         },
@@ -108,8 +121,12 @@ pub fn tool_definitions() -> Vec<Value> {
         json!({
             "name": "slug_snapshot",
             "description": "Read the current UI as a Playwright-style YAML tree. \
-                Each interactive node carries a short [ref=...] used by slug_invoke. \
-                Apps with no accessible tree are reported as opaque (vision needed).",
+                NOT a screenshot: a slug_snapshot is a point-in-time read of the \
+                semantic document (role, name, state, ref per element) as text/YAML — \
+                analogous to a database snapshot. No image, pixel, or OCR is involved \
+                anywhere in the pipeline. Each interactive node carries a short \
+                [ref=...] used by slug_invoke. Apps with no accessible tree are \
+                reported as opaque (vision needed).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -177,6 +194,40 @@ pub fn tool_definitions() -> Vec<Value> {
             "description": "List the running applications currently exposing an accessibility tree.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         }),
+        json!({
+            "name": "slug_agent_start_task",
+            "description": "Start the slug-brain agent on a natural-language task. Drives \
+                the UI autonomously via the same tools (observe→reason→act→verify).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "description": { "type": "string", "description": "What the agent should do." }
+                },
+                "required": ["description"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "slug_agent_status",
+            "description": "Current agent task, status (idle/running/paused/done/stopped), \
+                active provider/tier/model, and the last 20 reasoning/action log lines.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }),
+        json!({
+            "name": "slug_agent_pause",
+            "description": "Pause the running agent task (suspends the process).",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }),
+        json!({
+            "name": "slug_agent_resume",
+            "description": "Resume a paused agent task.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }),
+        json!({
+            "name": "slug_agent_stop",
+            "description": "Stop and clear the running agent task.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }),
     ]
 }
 
@@ -184,6 +235,7 @@ pub fn tool_definitions() -> Vec<Value> {
 /// tool execution failures are returned as `Ok` with `isError: true`.
 async fn handle_tool_call(
     session: &Arc<Session>,
+    control: Option<&Arc<AgentController>>,
     params: Value,
 ) -> std::result::Result<Value, (i64, String)> {
     let name = params.get("name").and_then(Value::as_str).ok_or((-32602, "missing tool name".into()))?;
@@ -194,6 +246,10 @@ async fn handle_tool_call(
         "slug_invoke" => tool_invoke(session, &args).await,
         "slug_wait_for" => tool_wait_for(session, &args).await,
         "slug_list_apps" => tool_list_apps(session).await,
+        name if name.starts_with("slug_agent_") => match control {
+            Some(ctrl) => agent_tool(ctrl, name, &args).await,
+            None => Err("agent control is not available on this transport".into()),
+        },
         other => return Err((-32602, format!("unknown tool: {other}"))),
     };
 
@@ -201,6 +257,28 @@ async fn handle_tool_call(
         Ok(text) => tool_text(text, false),
         Err(msg) => tool_text(msg, true),
     })
+}
+
+/// Dispatch an agent-control tool to the [`AgentController`].
+async fn agent_tool(
+    ctrl: &Arc<AgentController>,
+    name: &str,
+    args: &Value,
+) -> std::result::Result<String, String> {
+    match name {
+        "slug_agent_start_task" => {
+            let desc = args.get("description").and_then(Value::as_str).ok_or("missing 'description'")?;
+            ctrl.start_task(desc).await
+        }
+        "slug_agent_status" => {
+            let status = ctrl.status().await;
+            Ok(serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".into()))
+        }
+        "slug_agent_pause" => ctrl.pause().await,
+        "slug_agent_resume" => ctrl.resume().await,
+        "slug_agent_stop" => ctrl.stop().await,
+        other => Err(format!("unknown agent tool: {other}")),
+    }
 }
 
 /// Build a `tools/call` result object with a single text content block.

@@ -39,6 +39,19 @@ struct Cli {
     /// Don't prompt for destructive-action confirmation (auto-deny instead).
     #[arg(long)]
     non_interactive: bool,
+
+    /// Stream the run as JSON-lines events on stdout (status/step/final), for the
+    /// MCP dashboard's agent controller. Implies --non-interactive.
+    #[arg(long)]
+    jsonl: bool,
+}
+
+/// Print one JSON-lines event to stdout, flushed.
+fn emit_jsonl(event: &serde_json::Value) {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{event}");
+    let _ = out.flush();
 }
 
 #[tokio::main]
@@ -76,10 +89,47 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let mut brain = Brain::from_config(&cfg, &report, !cli.non_interactive)?;
+    let interactive = !cli.non_interactive && !cli.jsonl;
+    let mut brain = Brain::from_config(&cfg, &report, interactive)?;
+
+    if cli.jsonl {
+        use slug_brain::config::Provider;
+        // Resolve `auto` to a concrete provider for the status line.
+        let resolved = match cfg.brain.provider {
+            Provider::Auto => match cfg.backend.selection {
+                Selection::Cloud => Provider::Claude,
+                Selection::Local => Provider::Ollama,
+                Selection::Auto => {
+                    if report.backend == slug_brain::hardware::BackendKind::Cloud {
+                        Provider::Claude
+                    } else {
+                        Provider::Ollama
+                    }
+                }
+            },
+            other => other,
+        };
+        let provider = serde_json::to_value(resolved)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| "auto".to_string());
+        let cfg_model = cfg.resolved_provider(resolved).model;
+        let model = if cfg_model.is_empty() { report.model.clone() } else { cfg_model };
+        emit_jsonl(&serde_json::json!({
+            "kind": "status",
+            "provider": provider,
+            "tier": format!("{:?}", report.tier),
+            "model": model,
+        }));
+        emit_jsonl(&serde_json::json!({ "kind": "task", "description": task }));
+        brain = brain.with_observer(Box::new(|ev| emit_jsonl(&ev)));
+    }
+
     let outcome = brain.run(&task).await?;
 
-    println!("\n{}", outcome.answer);
+    if !cli.jsonl {
+        println!("\n{}", outcome.answer);
+    }
     eprintln!(
         "\n[slug-agent] {} step(s), {} tokens, ${:.4}{}",
         outcome.steps,
