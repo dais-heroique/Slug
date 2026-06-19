@@ -30,11 +30,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The PyO3 binding (slug-ui-py) is platform-neutral and built+tested on the
+      # ubuntu `test` job; exclude it from the cross-OS matrix to avoid per-OS
+      # Python toolchain setup (the matrix exists to compile-verify the
+      # accessibility backends).
       - name: Build (release)
-        run: cargo build --workspace --release
+        run: cargo build --workspace --exclude slug-ui-py --release
 
       - name: Clippy (all targets)
-        run: cargo clippy --workspace --all-targets --release
+        run: cargo clippy --workspace --exclude slug-ui-py --all-targets --release
 
   # Linux is the only target whose non-live tests can run headlessly in CI.
   test:
@@ -43,6 +47,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: Swatinem/rust-cache@v2
       - name: Test (workspace, no live-tests)
         run: cargo test --workspace

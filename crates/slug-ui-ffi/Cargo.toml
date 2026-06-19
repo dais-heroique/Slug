@@ -1,0 +1,19 @@
+[package]
+name = "slug-ui-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "C ABI for the slug-ui SDK (mirrors AccessKit's binding strategy)."
+
+[lib]
+name = "slug_ui_ffi"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+slug-ui = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+cbindgen = "0.29"
