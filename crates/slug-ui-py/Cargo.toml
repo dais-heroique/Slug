@@ -1,0 +1,17 @@
+[package]
+name = "slug-ui-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python (PyO3) binding for the slug-ui SDK."
+
+[lib]
+name = "slug_ui"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slugui = { path = "../slug-ui", package = "slug-ui" }
+serde_json = { workspace = true }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py39"] }
