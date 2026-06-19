@@ -193,11 +193,22 @@ This is still **no pixels and no model tokens**: it posts an OS input event, it 
 screenshot+vision fallback — it works on any app the OS can route keystrokes to,
 without the cost and storage of images.
 
-Implemented on **macOS** (Quartz `CGEvent`; requires Accessibility — and on recent
-macOS, Input Monitoring — permission). Linux/Windows synthetic input is a documented
-follow-up; on those platforms `slug_key` returns a clear "not yet implemented" tool
-error (never a crash). The semantic path (`slug_snapshot`/`slug_invoke`) is the
-default and works everywhere.
+Implemented on **macOS** (Quartz `CGEvent`; needs Accessibility — and on recent
+macOS, Input Monitoring — permission) and **Windows** (`SendInput`; no special
+permission). On **Linux**, synthetic input is constrained by the OS itself —
+Wayland blocks event injection by design and X11 would need XTEST — so `slug_key`
+returns a clear, explained tool error there (never a crash); the semantic path
+(`slug_snapshot`/`slug_invoke`) remains fully functional on Linux. The macOS and
+Windows synthetic paths are compile-verified on their target triples and need a
+real-hardware smoke test, as with the rest of the per-OS backends.
+
+### Snapshot latency
+
+`focused`/`window` snapshots deep-walk only the **frontmost application** (via the
+backend's `focused_app`), not the whole desktop, and the session keeps a short
+(250 ms) snapshot cache that is invalidated on every action — so the dashboard's
+polling and the agent's read-act-verify loop stay responsive without re-harvesting
+the entire accessibility tree each time. `desktop` scope still harvests everything.
 
 ## Connect Claude Code
 

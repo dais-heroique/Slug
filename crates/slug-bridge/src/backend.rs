@@ -126,6 +126,14 @@ pub trait AccessibilityBackend: Send + Sync {
     /// Enumerate running applications that expose an accessibility tree.
     fn enumerate_apps(&self) -> BoxFuture<'_, Result<Vec<AppHandle>>>;
 
+    /// The frontmost / focused application, if the backend can identify it
+    /// cheaply. Used to make `focused`/`window` snapshots fast: only this one app
+    /// is deep-walked instead of the whole desktop. The default returns `None`, so
+    /// callers fall back to a full-desktop harvest (correct, just slower).
+    fn focused_app(&self) -> BoxFuture<'_, Result<Option<AppHandle>>> {
+        Box::pin(async move { Ok(None) })
+    }
+
     /// Walk one application into a bounded list of [`SlugNode`]s (BFS/DFS), and
     /// capture the ref → native-handle map needed by [`AccessibilityBackend::invoke`].
     fn snapshot_app<'a>(&'a self, app: &'a AppHandle) -> BoxFuture<'a, Result<Vec<SlugNode>>>;

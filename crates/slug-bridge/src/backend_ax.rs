@@ -145,6 +145,18 @@ impl AccessibilityBackend for AxBackend {
         })
     }
 
+    fn focused_app(&self) -> BoxFuture<'_, Result<Option<AppHandle>>> {
+        Box::pin(async move {
+            let workspace = NSWorkspace::sharedWorkspace();
+            let Some(app) = workspace.frontmostApplication() else { return Ok(None) };
+            let pid = app.processIdentifier();
+            let name = app.localizedName().map(|s| s.to_string()).unwrap_or_default();
+            let backend_node_id = format!("{pid}:");
+            self.app_pids.lock().expect("mutex").insert(backend_node_id.clone(), pid);
+            Ok(Some(AppHandle { app_id: name.clone(), title: name, backend_node_id }))
+        })
+    }
+
     fn snapshot_app<'a>(&'a self, app: &'a AppHandle) -> BoxFuture<'a, Result<Vec<SlugNode>>> {
         Box::pin(async move {
             let pid = self

@@ -137,6 +137,7 @@
           <option value="window">window</option>
           <option value="desktop">desktop</option>
         </select>
+        <span id="treeStats" class="kv"></span>
         <span id="treeAge" class="kv"></span>
       </span>
     </h2>
@@ -183,6 +184,8 @@ async function loop() {
   await refreshStatus();
   // Refresh the (expensive) tree on its own slower cadence, and never when the tab is hidden.
   if (!document.hidden && Date.now() - treeAt > TREE_INTERVAL) refreshTree(false);
+  // Live "updated Ns ago" so staleness is always visible.
+  if (treeAt) document.getElementById('treeAge').textContent = 'updated ' + rel(treeAt, Date.now()) + ' ago';
   setTimeout(loop, tickInterval());
 }
 
@@ -258,7 +261,6 @@ async function refreshTree(force) {
     const { text } = await callTool('slug_snapshot', { scope });
     renderTree(text || '');
     treeAt = Date.now();
-    document.getElementById('treeAge').textContent = 'updated now';
   } catch (e) {
     setConn(false);
     document.getElementById('tree').innerHTML = '<span class="err">snapshot error: ' + esc(e.message) + '</span>';
@@ -277,15 +279,30 @@ function renderTree(raw) {
 
   const lines = raw.split('\n');
   let html = '', opaque = '';
-  let inOpaque = false;
+  let inOpaque = false, nodeCount = 0, rootName = '', opaqueCount = 0;
   for (const line of lines) {
-    if (line.startsWith('#')) { inOpaque = true; opaque += esc(line.replace(/^#\s?/, '')) + '\n'; continue; }
-    if (inOpaque) { opaque += esc(line.replace(/^#\s?/, '')) + '\n'; continue; }
+    if (line.startsWith('#')) {
+      inOpaque = true;
+      if (line.includes('- ')) opaqueCount++;
+      opaque += esc(line.replace(/^#\s?/, '')) + '\n'; continue;
+    }
+    if (inOpaque) { if (line.includes('- ')) opaqueCount++; opaque += esc(line.replace(/^#\s?/, '')) + '\n'; continue; }
     if (!line.trim()) { continue; }
+    if (!rootName) {
+      const nm = line.match(/"([^"]*)"/);
+      if (nm) rootName = nm[1];
+    }
+    nodeCount++;
     html += renderNodeLine(line) + '\n';
   }
   treeEl.innerHTML = html || '<span class="empty">(empty)</span>';
-  opaqueEl.innerHTML = opaque.trim() ? '<div class="opaque">⚠ opaque apps (no accessible tree — Slug cannot drive these):\n' + opaque + '</div>' : '';
+  opaqueEl.innerHTML = opaque.trim() ? '<div class="opaque">⚠ opaque apps (no accessible tree — use slug_key to drive them):\n' + opaque + '</div>' : '';
+  // Real perception info.
+  const stats = document.getElementById('treeStats');
+  let s = nodeCount + ' node' + (nodeCount === 1 ? '' : 's');
+  if (rootName) s += ' · ' + rootName;
+  if (opaqueCount) s += ' · ' + opaqueCount + ' opaque';
+  stats.textContent = s;
 }
 
 // One YAML line → colored HTML. Format: `<indent>- <role> "<name>" [ref=x] [state]...`

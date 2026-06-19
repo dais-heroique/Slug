@@ -105,7 +105,8 @@ tokens** (it injects an OS event, never a screenshot).
 
 Pattern for an opaque app: bring it to the front / focus its field if you can,
 then `slug_key`. For shortcuts in any app: just `slug_key {keys:"cmd+s"}`.
-(Implemented on macOS; on Linux/Windows it returns a clear not-implemented error.)
+(Implemented on macOS + Windows; on Linux it returns a clear error — Wayland
+blocks synthetic input by design, so use the semantic path there.)
 
 ### `slug_wait_for`
 ```json

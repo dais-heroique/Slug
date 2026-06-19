@@ -40,6 +40,8 @@ pub mod backend_ax;
 pub mod synth_macos;
 #[cfg(target_os = "windows")]
 pub mod backend_uia;
+#[cfg(target_os = "windows")]
+pub mod synth_windows;
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -117,6 +119,17 @@ impl Bridge {
     pub async fn snapshot_desktop(&self) -> Result<SnapshotResult> {
         let apps = self.backend.enumerate_apps().await?;
         self.snapshot_apps(&apps).await
+    }
+
+    /// Harvest only the **focused** application when the backend can identify it
+    /// (fast path for `focused`/`window` scope); otherwise fall back to a full
+    /// desktop harvest. This is the main snapshot-latency optimisation.
+    #[instrument(skip(self))]
+    pub async fn snapshot_focused(&self) -> Result<SnapshotResult> {
+        if let Some(app) = self.backend.focused_app().await? {
+            return self.snapshot_apps(std::slice::from_ref(&app)).await;
+        }
+        self.snapshot_desktop().await
     }
 
     /// Harvest a single application by name / native id / ref.
