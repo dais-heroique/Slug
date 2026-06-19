@@ -91,6 +91,23 @@ Result text tells you what happened:
   the call went through but nothing changed. Re-snapshot; you probably had a stale
   ref, a disabled node, or the wrong action for that role.
 
+### `slug_launch` — open an app first
+```json
+{ "name": "Spotify", "uri": "spotify:playlist:37i9dQ…" }
+```
+Launch an app by name before driving it (Slug only controls running apps). `uri`
+optionally opens a deep link / file with it. Works even without the a11y bus.
+Pattern for "open Spotify and play my playlist": `slug_launch {name:"Spotify"}` →
+`slug_wait_for` / `slug_snapshot focused` → `slug_invoke <playlist-ref> click`.
+
+### `slug_click` — mouse click anywhere
+```json
+{ "x": 640, "y": 360 }
+```
+Synthetic left click at absolute screen coordinates — for clicking where there is
+no accessible node (opaque apps, canvas). When a node IS accessible, prefer
+`slug_invoke <ref> click` (more robust). macOS + Windows; Linux OS-constrained.
+
 ### `slug_key` — drive ANY app, including opaque ones
 ```json
 { "keys": "cmd+s", "mode": "chord" | "text", "ref": "i1", "reasoning": "why" }

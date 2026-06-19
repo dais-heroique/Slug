@@ -314,10 +314,12 @@ fn perform(el: AXUIElementRef, action: &Action) -> Result<()> {
         }
         Action::SetValue(v) => ax_set(el, kAXValueAttribute, CFNumber::from(*v).as_CFType()),
         // Synthetic input doesn't target a node; it's routed via `synth_input`.
-        Action::Key(_) | Action::TypeText(_) => Err(BridgeError::InvalidArgs {
-            action: action.id(),
-            detail: "synthetic input must go through synth_input, not a node ref".into(),
-        }),
+        Action::Key(_) | Action::TypeText(_) | Action::MouseClick { .. } => {
+            Err(BridgeError::InvalidArgs {
+                action: action.id(),
+                detail: "synthetic input must go through synth_input, not a node ref".into(),
+            })
+        }
     }
 }
 

@@ -30,6 +30,10 @@ pub enum Action {
     /// Synthetic literal text typed into the OS-focused app (unicode). Same
     /// "works on any app" property as [`Action::Key`].
     TypeText(String),
+    /// Synthetic left mouse click at absolute screen coordinates. Lets the agent
+    /// click anywhere — including inside opaque apps — when it has a position
+    /// (e.g. a node's `bounds`). No pixels are captured.
+    MouseClick { x: f64, y: f64 },
 }
 
 impl Action {
@@ -53,6 +57,13 @@ impl Action {
                 Ok(Action::Key(arg.unwrap_or("").to_string()))
             }
             "type_text" | "synth_type" => Ok(Action::TypeText(arg.unwrap_or("").to_string())),
+            "click_at" | "mouse_click" => {
+                let (x, y) = parse_xy(arg).ok_or_else(|| BridgeError::InvalidArgs {
+                    action: "click_at".into(),
+                    detail: "expected coordinates as 'x,y'".into(),
+                })?;
+                Ok(Action::MouseClick { x, y })
+            }
             "toggle" | "expand" | "collapse" | "check" | "uncheck" | "select" => {
                 Ok(Action::Named(v))
             }
@@ -70,14 +81,22 @@ impl Action {
             Action::Focus => "focus".into(),
             Action::Key(_) => "key".into(),
             Action::TypeText(_) => "type_text".into(),
+            Action::MouseClick { .. } => "click_at".into(),
         }
     }
 
-    /// Whether this action is synthetic OS input (targets the focused app, not a
-    /// specific node) — routed to [`crate::AccessibilityBackend::synth_input`].
+    /// Whether this action is synthetic OS input (targets the focused app/screen,
+    /// not a specific node) — routed to [`crate::AccessibilityBackend::synth_input`].
     pub fn is_synthetic(&self) -> bool {
-        matches!(self, Action::Key(_) | Action::TypeText(_))
+        matches!(self, Action::Key(_) | Action::TypeText(_) | Action::MouseClick { .. })
     }
+}
+
+/// Parse an `"x,y"` (or `"x y"`) coordinate string.
+fn parse_xy(arg: Option<&str>) -> Option<(f64, f64)> {
+    let s = arg?.trim();
+    let (a, b) = s.split_once(',').or_else(|| s.split_once(char::is_whitespace))?;
+    Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
 }
 
 #[cfg(test)]
@@ -104,5 +123,16 @@ mod tests {
         assert!(t.is_synthetic());
         // Regular actions are not synthetic.
         assert!(!Action::parse("click", None).unwrap().is_synthetic());
+    }
+
+    #[test]
+    fn parses_mouse_click_coordinates() {
+        let m = Action::parse("click_at", Some("100,250")).unwrap();
+        assert!(matches!(m, Action::MouseClick { x, y } if x == 100.0 && y == 250.0));
+        assert!(m.is_synthetic());
+        // Space-separated also works.
+        assert!(matches!(Action::parse("click_at", Some("12 34")).unwrap(), Action::MouseClick { .. }));
+        // Bad coords error.
+        assert!(Action::parse("click_at", Some("nope")).is_err());
     }
 }

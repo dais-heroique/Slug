@@ -15,22 +15,39 @@
 //! (and, depending on macOS version, **Input Monitoring**) permission — the same
 //! TCC grant the AX backend already requires.
 
-use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode};
+use core_graphics::event::{
+    CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
+};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use core_graphics::geometry::CGPoint;
 
 use crate::action::Action;
 use crate::error::{BridgeError, Result};
 
-/// Perform a synthetic-input [`Action`] (`Key` or `TypeText`).
+/// Perform a synthetic-input [`Action`] (`Key`, `TypeText`, or `MouseClick`).
 pub fn perform_synth(action: &Action) -> Result<()> {
     match action {
         Action::Key(spec) => key_chord(spec),
         Action::TypeText(text) => type_text(text),
+        Action::MouseClick { x, y } => mouse_click(*x, *y),
         other => Err(BridgeError::InvalidArgs {
             action: other.id(),
             detail: "not a synthetic-input action".into(),
         }),
     }
+}
+
+/// Left-click at absolute screen coordinates.
+fn mouse_click(x: f64, y: f64) -> Result<()> {
+    let src = source()?;
+    let pt = CGPoint::new(x, y);
+    let down = CGEvent::new_mouse_event(src.clone(), CGEventType::LeftMouseDown, pt, CGMouseButton::Left)
+        .map_err(|_| BridgeError::Backend("CGEvent mouse (down) failed".into()))?;
+    down.post(CGEventTapLocation::HID);
+    let up = CGEvent::new_mouse_event(src, CGEventType::LeftMouseUp, pt, CGMouseButton::Left)
+        .map_err(|_| BridgeError::Backend("CGEvent mouse (up) failed".into()))?;
+    up.post(CGEventTapLocation::HID);
+    Ok(())
 }
 
 fn source() -> Result<CGEventSource> {

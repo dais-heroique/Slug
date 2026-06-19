@@ -10,26 +10,50 @@
 //!   (no per-character virtual-key mapping needed).
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10,
-    VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_LEFT,
-    VK_LWIN, VK_MENU as VK_ALT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT,
-    VK_SPACE, VK_TAB, VK_UP, VK_CONTROL,
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEINPUT, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END,
+    VK_ESCAPE, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8,
+    VK_F9, VK_HOME, VK_LEFT, VK_LWIN, VK_MENU as VK_ALT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT,
+    VK_SHIFT, VK_SPACE, VK_TAB, VK_UP, VK_CONTROL,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
 use crate::action::Action;
 use crate::error::{BridgeError, Result};
 
-/// Perform a synthetic-input [`Action`] (`Key` or `TypeText`).
+/// Perform a synthetic-input [`Action`] (`Key`, `TypeText`, or `MouseClick`).
 pub fn perform_synth(action: &Action) -> Result<()> {
     match action {
         Action::Key(spec) => key_chord(spec),
         Action::TypeText(text) => type_text(text),
+        Action::MouseClick { x, y } => mouse_click(*x, *y),
         other => Err(BridgeError::InvalidArgs {
             action: other.id(),
             detail: "not a synthetic-input action".into(),
         }),
     }
+}
+
+/// Left-click at absolute screen coordinates (normalised to the primary screen).
+fn mouse_click(x: f64, y: f64) -> Result<()> {
+    let (sw, sh) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+    if sw <= 1 || sh <= 1 {
+        return Err(BridgeError::Backend("GetSystemMetrics returned no screen size".into()));
+    }
+    let nx = ((x * 65535.0) / (sw - 1) as f64).round() as i32;
+    let ny = ((y * 65535.0) / (sh - 1) as f64).round() as i32;
+    let mouse = |flags| INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT { dx: nx, dy: ny, mouseData: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
+        },
+    };
+    send(&[
+        mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE),
+        mouse(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE),
+        mouse(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE),
+    ])
 }
 
 fn send(inputs: &[INPUT]) -> Result<()> {

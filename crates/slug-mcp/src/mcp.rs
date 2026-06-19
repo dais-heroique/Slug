@@ -168,6 +168,38 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "slug_launch",
+            "description": "Launch an application by name (e.g. 'Spotify'), optionally \
+                opening a URI / deep link with it (e.g. uri 'spotify:playlist:…'). Use \
+                this to START an app before driving it — Slug otherwise only controls \
+                already-running apps. Works without the accessibility bus.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Application name, e.g. Spotify, Safari, Finder." },
+                    "uri": { "type": "string", "description": "Optional URI / deep link / file path to open with it." }
+                },
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "slug_click",
+            "description": "Synthetic left mouse click at absolute screen coordinates \
+                (x, y). Lets the agent click ANYWHERE, including inside opaque apps, when \
+                it has a position (e.g. from a node's bounds). No pixels are captured. \
+                macOS + Windows implemented; Linux is OS-constrained.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "x": { "type": "number", "description": "Absolute screen X." },
+                    "y": { "type": "number", "description": "Absolute screen Y." },
+                    "reasoning": { "type": "string", "description": "Why (logged)." }
+                },
+                "required": ["x", "y"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "slug_key",
             "description": "Send synthetic keyboard input to the focused app — a key \
                 chord (mode=chord, e.g. 'cmd+s', 'return', 'shift+tab', 'down') or \
@@ -265,6 +297,8 @@ async fn handle_tool_call(
     let result = match name {
         "slug_snapshot" => tool_snapshot(session, &args).await,
         "slug_invoke" => tool_invoke(session, &args).await,
+        "slug_launch" => tool_launch(session, &args).await,
+        "slug_click" => tool_click(session, &args).await,
         "slug_key" => tool_key(session, &args).await,
         "slug_wait_for" => tool_wait_for(session, &args).await,
         "slug_list_apps" => tool_list_apps(session).await,
@@ -340,6 +374,25 @@ async fn tool_invoke(session: &Arc<Session>, args: &Value) -> std::result::Resul
     } else {
         format!("note: {action} on {r} was dispatched but the toolkit reported no effect")
     })
+}
+
+async fn tool_launch(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
+    let name = args.get("name").and_then(Value::as_str).unwrap_or("");
+    let uri = args.get("uri").and_then(Value::as_str);
+    if name.is_empty() && uri.is_none() {
+        return Err("provide 'name' or 'uri'".into());
+    }
+    session.launch(name, uri).await.map_err(|e| e.to_string())?;
+    let suffix = uri.map(|u| format!(" ({u})")).unwrap_or_default();
+    Ok(format!("ok: launched {name}{suffix}"))
+}
+
+async fn tool_click(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
+    let x = args.get("x").and_then(Value::as_f64).ok_or("missing numeric 'x'")?;
+    let y = args.get("y").and_then(Value::as_f64).ok_or("missing numeric 'y'")?;
+    let reasoning = args.get("reasoning").and_then(Value::as_str);
+    session.synth("click_at", Some(&format!("{x},{y}")), None, reasoning).await.map_err(|e| e.to_string())?;
+    Ok(format!("ok: clicked at {x},{y}"))
 }
 
 async fn tool_key(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {

@@ -229,6 +229,14 @@ impl Session {
         Ok(ok)
     }
 
+    /// Launch an application by name (and optionally open a URI / deep link with
+    /// it) — e.g. "open Spotify". Does not require the accessibility bus.
+    pub async fn launch(&self, name: &str, uri: Option<&str>) -> Result<()> {
+        slug_bridge::launch::launch(name, uri).map_err(SessionError::Bridge)?;
+        self.invalidate_cache().await;
+        Ok(())
+    }
+
     /// List running accessible applications.
     pub async fn list_apps(self: &Arc<Self>) -> Result<Vec<slug_bridge::AppInfo>> {
         let bridge = self.ensure_bridge().await?;

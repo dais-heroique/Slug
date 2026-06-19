@@ -138,7 +138,9 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 |------|-------|--------|
 | `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop" }` | The UI as a Playwright-style YAML tree; each node has a short `[ref=…]`. |
 | `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action. |
-| `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. See [Controlling any app](#controlling-any-app-synthetic-input). |
+| `slug_launch` | `{ "name": "Spotify", "uri"?: "spotify:playlist:…" }` | **Launch** an app by name (and optionally open a URI / deep link). Slug otherwise only drives already-running apps. See [Controlling any app](#controlling-any-app-launch-keyboard-mouse). |
+| `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. |
+| `slug_click` | `{ "x": 640, "y": 360, "reasoning"?: "…" }` | Synthetic left mouse click at absolute screen coordinates — click **anywhere**, including opaque apps. No pixels. |
 | `slug_wait_for` | `{ "event_type"?: "focus_changed" \| …, "timeout_ms": 5000 }` | Blocks until a live UI event occurs or the timeout elapses. |
 | `slug_list_apps` | `{}` | Lists running applications exposing an accessibility tree. |
 | `slug_agent_start_task` | `{ "description": "…" }` | Starts the `slug-brain` agent on a task (see [Control dashboard](#mcp-native-control-dashboard)). |
@@ -172,12 +174,29 @@ renders the *exact same text* the agent reads, so a human supervising the agent
 sees no screenshots either. (This note is mirrored in the `slug_snapshot` MCP
 tool description so MCP clients see it too.)
 
-## Controlling any app (synthetic input)
+## Controlling any app (launch, keyboard, mouse)
+
+A full task like *"open Spotify and play my playlist"* uses three capabilities:
+
+1. **Launch** the app — `slug_launch { "name": "Spotify" }` (Slug otherwise only
+   drives already-running apps). You can also open a deep link:
+   `slug_launch { "name": "Spotify", "uri": "spotify:playlist:37i9dQ…" }`.
+2. **Click inside it** — for apps with an accessibility tree (Spotify, Safari,
+   Finder, most native and Electron apps) the agent reads `slug_snapshot` and
+   clicks elements with `slug_invoke { ref, action: "click" }`. That *is* clicking
+   inside the app, on real controls — not just opening it.
+3. **Type / shortcuts / click anywhere** — `slug_key` for keyboard, `slug_click`
+   for a mouse click at coordinates.
+
+So the flow is: `slug_launch Spotify` → `slug_snapshot focused` → find the playlist
+→ `slug_invoke <ref> click` (or `slug_key`/`slug_click`). Each step verifies with a
+fresh snapshot.
 
 Most apps expose an accessibility tree, so the agent reads them with `slug_snapshot`
 and acts with `slug_invoke` on a `ref`. Some apps expose **no** (or only a partial)
-tree — games, some Electron/canvas apps — and show up as *opaque*. To drive those
-too, `slug_key` injects **synthetic OS keyboard input** into the focused app:
+tree — games, some canvas apps — and show up as *opaque*. To drive those too,
+`slug_key` injects **synthetic OS keyboard input**, and `slug_click` a **synthetic
+mouse click** at coordinates, into the focused app:
 
 ```jsonc
 // a key chord (shortcuts, navigation): cmd+s, shift+tab, return, escape, up …

@@ -111,6 +111,8 @@ Run it:
 |------|-------|--------|
 | `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop" }` (default `window`) | UI as Playwright-style YAML tree; each node has a short `[ref=…]`. Not a screenshot. |
 | `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action (`toggle`, `expand`, `select`, …). `ref` + `action` required. |
+| `slug_launch` | `{ "name": "Spotify", "uri"?: "spotify:playlist:…" }` | **Launch** an app by name (+ optional URI/deep link). Slug otherwise only drives running apps. Works without the a11y bus. Cross-platform (open / start / xdg-open). |
+| `slug_click` | `{ "x": 640, "y": 360, "reasoning"?: "…" }` | Synthetic left mouse click at absolute screen coords — click anywhere incl. opaque apps. macOS (CGEvent) + Windows (SendInput); Linux OS-constrained. |
 | `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic OS keyboard input to the focused app — key chord or literal text. Drives **any** app incl. opaque ones (no tree), still no pixels/tokens. macOS (CGEvent) + Windows (SendInput) implemented; Linux is OS-constrained (Wayland blocks injection) and returns a clear error. Optional `ref` focuses a node first. |
 | `slug_wait_for` | `{ "event_type"?: "node_created"\|"node_destroyed"\|"node_updated"\|"focus_changed"\|"any", "timeout_ms": 5000 }` | Blocks until a live UI event or timeout. |
 | `slug_list_apps` | `{}` | Running apps exposing an accessibility tree. |

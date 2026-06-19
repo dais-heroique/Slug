@@ -31,6 +31,7 @@ pub mod action;
 pub mod backend;
 pub mod coverage;
 pub mod error;
+pub mod launch;
 
 #[cfg(target_os = "linux")]
 pub mod backend_atspi;
@@ -216,6 +217,13 @@ impl Bridge {
         info!(action = %action.id(), "synth_input");
         self.backend.synth_input(&action).await?;
         Ok(true)
+    }
+
+    /// Launch an application by name (e.g. `Spotify`), optionally opening a URI /
+    /// deep link with it. The agent uses this to start an app before driving it.
+    pub async fn launch_app(&self, name: &str, uri: Option<&str>) -> Result<()> {
+        info!(name, uri = uri.unwrap_or(""), "launch_app");
+        crate::launch::launch(name, uri)
     }
 
     /// Subscribe to live semantic events. The subscription is kept alive for the
