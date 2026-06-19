@@ -104,6 +104,50 @@ async fn tool_call_without_bus_is_an_iserror_result_not_protocol_error() {
 }
 
 #[tokio::test]
+async fn launch_without_name_or_uri_is_an_iserror_result() {
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(6, "tools/call", json!({ "name": "slug_launch", "arguments": {} })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+    assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("provide"));
+}
+
+#[tokio::test]
+async fn click_without_coords_is_an_iserror_result() {
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(7, "tools/call", json!({ "name": "slug_click", "arguments": { "x": 10 } })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+    assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("'y'"));
+}
+
+#[tokio::test]
+async fn key_without_keys_is_an_iserror_result() {
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(8, "tools/call", json!({ "name": "slug_key", "arguments": {} })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+}
+
+#[tokio::test]
 async fn unknown_tool_name_is_a_protocol_error() {
     let session = Session::new();
     let resp = handle(

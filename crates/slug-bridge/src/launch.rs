@@ -78,3 +78,22 @@ fn which(bin: &str) -> bool {
         .map(|s| s.success())
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_request_is_an_error() {
+        assert!(launch("", None).is_err());
+        assert!(launch("   ", Some("")).is_err());
+    }
+
+    // On non-macOS/Windows the name path runs the binary directly, so a harmless
+    // always-present command exercises the spawn logic end to end.
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[test]
+    fn launches_a_harmless_binary() {
+        assert!(launch("true", None).is_ok());
+    }
+}

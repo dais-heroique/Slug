@@ -107,11 +107,16 @@ fn initialize_result() -> Value {
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": { "tools": { "listChanged": false } },
         "serverInfo": { "name": "slug-mcp", "version": env!("CARGO_PKG_VERSION") },
-        "instructions": "Slug exposes the Linux AT-SPI2 accessibility tree as a \
-            semantic document. Call slug_snapshot to read the UI as YAML (each node \
-            has a short [ref=...]), then slug_invoke with that ref to click, type, \
-            focus, or set values. Use slug_wait_for to await UI changes and \
-            slug_list_apps to see running applications."
+        "instructions": "Slug exposes the OS accessibility tree as a semantic \
+            document (text, never a screenshot). Logical workflow: (1) slug_launch \
+            to open an app by name if it isn't running; (2) slug_snapshot (scope \
+            'focused' is smallest/fastest) to read the UI as YAML — each node has a \
+            short [ref=...]; (3) act: slug_invoke <ref> click/set_text/set_value/focus \
+            for accessible controls, slug_key for keyboard chords or text, slug_click \
+            x,y for a mouse click anywhere; (4) verify with a fresh slug_snapshot. \
+            Use slug_wait_for to await UI changes and slug_list_apps to see running \
+            apps. Prefer slug_invoke on a ref over slug_click coordinates when a node \
+            exists. Always snapshot focused, act on refs, then re-snapshot to confirm."
     })
 }
 
