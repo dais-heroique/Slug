@@ -103,6 +103,13 @@ in [CI](.github/workflows/ci.yml) on `windows-latest` / `macos-latest`.
   missing, returns a typed error with these instructions (it never panics).
 - **Good first targets:** TextEdit, Finder, Safari.
 
+## Install
+
+The easiest path is a **release download** — a double-click **Slug.app** on macOS,
+an `install.ps1` on Windows, a tarball on Linux — see **[INSTALL.md](./INSTALL.md)**
+for downloads, permissions, and the AI-provider setup on every OS. To build it
+yourself instead:
+
 ## Build
 
 ```sh
