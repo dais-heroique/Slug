@@ -5,132 +5,349 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Slug — Control Dashboard</title>
 <style>
-  :root { color-scheme: dark; }
-  body { margin: 0; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-         background: #0d1117; color: #c9d1d9; }
-  header { padding: 14px 20px; background: #161b22; border-bottom: 1px solid #30363d; }
-  header h1 { margin: 0 0 4px; font-size: 16px; }
-  .banner { color: #58a6ff; font-weight: 600; }
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #21262d;
-          border: 1px solid #30363d; margin-right: 6px; font-size: 12px; }
-  .pill.running { color: #3fb950; border-color: #238636; }
-  .pill.paused  { color: #d29922; border-color: #9e6a03; }
-  .pill.stopped, .pill.error { color: #f85149; border-color: #b62324; }
-  .pill.done    { color: #58a6ff; }
-  main { display: grid; grid-template-columns: 1fr 1fr; gap: 0; height: calc(100vh - 132px); }
-  section { overflow: auto; padding: 12px 16px; }
-  section.tree { border-right: 1px solid #30363d; }
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #8b949e; margin: 0 0 8px; }
-  pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-  .log div { padding: 1px 0; border-bottom: 1px solid #161b22; }
-  .err { color: #f85149; }
-  form { display: flex; gap: 8px; padding: 12px 20px; background: #161b22; border-top: 1px solid #30363d; }
-  input { flex: 1; padding: 8px 10px; background: #0d1117; color: #c9d1d9;
-          border: 1px solid #30363d; border-radius: 6px; font: inherit; }
-  button { padding: 8px 14px; background: #238636; color: #fff; border: 0; border-radius: 6px;
-           font: inherit; cursor: pointer; }
-  button.ghost { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117; --panel: #161b22; --panel2: #0d1117; --line: #30363d;
+    --fg: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --green-d: #238636; --yellow: #d29922; --red: #f85149;
+    --chip: #21262d;
+    --role-window:#a371f7; --role-button:#58a6ff; --role-entry:#3fb950;
+    --role-check:#d29922; --role-text:#8b949e; --role-link:#79c0ff; --role-menu:#ff7b72;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         background: var(--bg); color: var(--fg); }
+
+  header { padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  header .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 700; }
+  .banner { color: var(--accent); font-weight: 600; margin-top: 4px; font-size: 12px; }
+  .conn { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  main { flex: 1 1 auto; display: grid; grid-template-columns: 300px 1fr 360px; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  .col:last-child { border-right: 0; }
+  .col h2 { margin: 0; padding: 9px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+            color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto;
+            display: flex; align-items: center; gap: 8px; }
+  .col .body { flex: 1 1 auto; overflow: auto; padding: 12px 14px; }
+
+  /* Pills / badges */
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 11px; background: var(--chip);
+          border: 1px solid var(--line); font-size: 11px; white-space: nowrap; }
+  .pill.running { color: var(--green); border-color: var(--green-d); }
+  .pill.paused  { color: var(--yellow); border-color: #9e6a03; }
+  .pill.stopped, .pill.error { color: var(--red); border-color: #b62324; }
+  .pill.done, .pill.idle { color: var(--accent); }
+
+  /* Left column: agent control */
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .kv { font-size: 11px; color: var(--muted); }
+  .kv b { color: var(--fg); font-weight: 600; }
+  textarea { width: 100%; min-height: 70px; resize: vertical; padding: 8px 10px; background: var(--panel2);
+             color: var(--fg); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  button { padding: 8px 12px; background: var(--green-d); color: #fff; border: 0; border-radius: 6px;
+           font: inherit; cursor: pointer; transition: opacity .12s; }
+  button.ghost { background: var(--chip); color: var(--fg); border: 1px solid var(--line); }
+  button.start { grid-column: 1 / -1; }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* Center column: semantic tree */
+  .toolbar { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 11px; }
+  select { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 5px;
+           font: inherit; padding: 2px 6px; }
+  .tree { white-space: pre; }
+  .node { display: block; }
+  .role { font-weight: 700; }
+  .role.window{color:var(--role-window)} .role.button{color:var(--role-button)}
+  .role.entry{color:var(--role-entry)} .role.checkbox{color:var(--role-check)}
+  .role.text{color:var(--role-text)} .role.link{color:var(--role-link)} .role.menu{color:var(--role-menu)}
+  .name { color: var(--fg); }
+  .ref { display: inline-block; padding: 0 6px; margin-left: 4px; border-radius: 9px; cursor: pointer;
+         background: var(--chip); border: 1px solid var(--line); color: var(--accent); font-size: 11px; }
+  .ref:hover { border-color: var(--accent); }
+  .ref.copied { color: var(--green); border-color: var(--green-d); }
+  .st { display: inline-block; padding: 0 6px; margin-left: 4px; border-radius: 9px; font-size: 10px;
+        background: #1c2128; border: 1px solid var(--line); color: var(--muted); }
+  .st.focused { color: var(--accent); border-color: #1f6feb; }
+  .st.checked, .st.selected, .st.expanded { color: var(--green); border-color: var(--green-d); }
+  .st.disabled, .st.readonly { color: var(--muted); }
+  .opaque { margin-top: 14px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px;
+            color: var(--yellow); font-size: 11px; white-space: pre-wrap; }
+
+  /* Right column: action log */
+  .log .row { padding: 4px 0; border-bottom: 1px solid #1c2128; display: flex; gap: 8px; align-items: baseline; }
+  .log .ts { color: var(--muted); font-size: 10px; flex: 0 0 auto; min-width: 34px; }
+  .log .msg { flex: 1 1 auto; word-break: break-word; }
+  .log .row.err .msg { color: var(--red); }
+  .log .row.step .msg { color: var(--fg); }
+  .log .row.done .msg { color: var(--green); }
+  .log .row.head .msg { color: var(--accent); }
+  .empty { color: var(--muted); font-style: italic; }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-auto-rows: minmax(180px, auto); }
+    .col { border-right: 0; border-bottom: 1px solid var(--line); }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>Slug — Control Dashboard</h1>
-  <div class="banner">Slug never captures pixels. Everything below is the same structured text the agent reads.</div>
-  <div style="margin-top:8px">
-    <span id="status" class="pill">idle</span>
-    <span id="provider" class="pill"></span>
-    <span id="tier" class="pill"></span>
-    <span id="task" class="pill"></span>
-    <button class="ghost" onclick="ctl('slug_agent_pause')">Pause</button>
-    <button class="ghost" onclick="ctl('slug_agent_resume')">Resume</button>
-    <button class="ghost" onclick="ctl('slug_agent_stop')">Stop</button>
+  <div class="top">
+    <h1>🐌 Slug — Control Dashboard</h1>
+    <span class="conn"><span id="dot" class="dot"></span><span id="connText">connecting…</span></span>
   </div>
+  <div class="banner">Slug never captures pixels. Everything below is the same structured text the agent reads.</div>
 </header>
 
 <main>
-  <section class="tree">
-    <h2>Semantic tree (slug_snapshot — text, never a screenshot)</h2>
-    <pre id="tree">(loading…)</pre>
-  </section>
-  <section>
+  <!-- LEFT: agent control -->
+  <div class="col">
+    <h2>Agent control <span id="statusPill" class="pill idle" style="margin-left:auto">idle</span></h2>
+    <div class="body">
+      <div class="meta">
+        <span class="kv">provider <b id="mProvider">—</b></span>
+        <span class="kv">tier <b id="mTier">—</b></span>
+        <span class="kv">model <b id="mModel">—</b></span>
+      </div>
+      <div class="kv" style="margin-bottom:6px">task</div>
+      <div id="mTask" style="margin-bottom:14px; color:var(--fg)">—</div>
+
+      <textarea id="taskInput" placeholder="Describe a task, e.g. 'open the Open dialog and pick README'"></textarea>
+      <div class="btns">
+        <button id="bStart" class="start" onclick="startTask()">▶ Start task</button>
+        <button id="bPause"  class="ghost" onclick="ctl('slug_agent_pause')">⏸ Pause</button>
+        <button id="bResume" class="ghost" onclick="ctl('slug_agent_resume')">▶ Resume</button>
+        <button id="bStop"   class="ghost" onclick="ctl('slug_agent_stop')" style="grid-column:1/-1">■ Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: semantic tree -->
+  <div class="col">
+    <h2>Semantic tree — text, never a screenshot
+      <span class="toolbar">
+        scope
+        <select id="scope" onchange="refreshTree(true)">
+          <option value="focused" selected>focused</option>
+          <option value="window">window</option>
+          <option value="desktop">desktop</option>
+        </select>
+        <span id="treeAge" class="kv"></span>
+      </span>
+    </h2>
+    <div class="body"><div id="tree" class="tree empty">loading…</div><div id="opaque"></div></div>
+  </div>
+
+  <!-- RIGHT: action log -->
+  <div class="col">
     <h2>Agent reasoning / action log</h2>
-    <div class="log" id="log"></div>
-  </section>
+    <div class="body log" id="log"><div class="empty">no activity yet</div></div>
+  </div>
 </main>
 
-<form onsubmit="startTask(event)">
-  <input id="taskInput" placeholder="Describe a task for the agent, e.g. 'open the Open dialog and pick README'" />
-  <button type="submit">Start task</button>
-</form>
-
 <script>
-let rpcId = 0;
+//──────────────────────────────────────── MCP transport ────────────────────────────────────────
+let rpcId = 0, online = false;
 async function callTool(name, args = {}) {
   const res = await fetch('/mcp', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call',
-                           params: { name, arguments: args } }),
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name, arguments: args } }),
   });
   const json = await res.json();
+  setConn(true);
   if (json.error) throw new Error(json.error.message);
   const block = json.result && json.result.content && json.result.content[0];
   return { text: block ? block.text : '', isError: !!(json.result && json.result.isError) };
 }
-
-function setPill(id, text, cls) {
-  const el = document.getElementById(id);
-  el.textContent = text || '';
-  el.className = 'pill' + (cls ? ' ' + cls : '');
-  el.style.display = text ? '' : 'none';
+function setConn(ok) {
+  if (ok === online) return;
+  online = ok;
+  document.getElementById('dot').className = 'dot' + (ok ? ' ok' : '');
+  document.getElementById('connText').textContent = ok ? 'connected' : 'disconnected';
 }
 
-async function refresh() {
-  // 1. Agent status (task, provider/tier, last 20 log lines).
+//──────────────────────────────────────── State / polling ───────────────────────────────────────
+let lastStatus = 'idle';
+let treeAt = 0;                 // when the tree was last refreshed
+const TREE_INTERVAL = 1500;     // ms between tree refreshes (the expensive call)
+let statusInFlight = false, treeInFlight = false;
+
+function tickInterval() { return lastStatus === 'running' ? 800 : 3000; }
+
+async function loop() {
+  await refreshStatus();
+  // Refresh the (expensive) tree on its own slower cadence, and never when the tab is hidden.
+  if (!document.hidden && Date.now() - treeAt > TREE_INTERVAL) refreshTree(false);
+  setTimeout(loop, tickInterval());
+}
+
+//──────────────────────────────────────── Agent status (left + right) ───────────────────────────
+async function refreshStatus() {
+  if (statusInFlight) return;
+  statusInFlight = true;
   try {
     const { text } = await callTool('slug_agent_status');
     const s = JSON.parse(text);
-    setPill('status', s.status, s.status);
-    setPill('provider', s.provider ? 'provider: ' + s.provider : '');
-    setPill('tier', s.tier ? s.tier : '');
-    setPill('task', s.task ? 'task: ' + s.task : '');
-    const log = document.getElementById('log');
-    log.innerHTML = '';
-    (s.log || []).forEach(line => {
-      const d = document.createElement('div');
-      if (line.includes('[ERROR]') || line.startsWith('·')) d.className = 'err';
-      d.textContent = line;
-      log.appendChild(d);
-    });
+    lastStatus = s.status || 'idle';
+    setStatusPill(s.status);
+    document.getElementById('mProvider').textContent = s.provider || '—';
+    document.getElementById('mTier').textContent     = s.tier || '—';
+    document.getElementById('mModel').textContent    = s.model || '—';
+    document.getElementById('mTask').textContent     = s.task || '—';
+    setButtons(s.status);
+    renderLog(s.log || []);
   } catch (e) {
-    setPill('status', 'mcp error', 'error');
-  }
-  // 2. The same semantic tree the agent reads — rendered as text.
-  try {
-    const { text } = await callTool('slug_snapshot', { scope: 'focused' });
-    document.getElementById('tree').textContent = text || '(empty)';
-  } catch (e) {
-    document.getElementById('tree').textContent = 'snapshot error: ' + e.message;
-  }
+    setConn(false);
+    setStatusPill('error');
+  } finally { statusInFlight = false; }
 }
 
-async function startTask(ev) {
-  ev.preventDefault();
+function setStatusPill(status) {
+  const el = document.getElementById('statusPill');
+  el.textContent = status || 'idle';
+  el.className = 'pill ' + (status || 'idle');
+}
+function setButtons(status) {
+  const running = status === 'running', paused = status === 'paused';
+  document.getElementById('bStart').disabled  = running || paused;
+  document.getElementById('bPause').disabled  = !running;
+  document.getElementById('bResume').disabled = !paused;
+  document.getElementById('bStop').disabled   = !(running || paused);
+}
+
+// Track when each log line first appeared so we can show a relative age.
+const seen = new Map();
+function renderLog(lines) {
+  const box = document.getElementById('log');
+  if (!lines.length) { box.innerHTML = '<div class="empty">no activity yet</div>'; return; }
+  const now = Date.now();
+  box.innerHTML = '';
+  for (const line of lines) {
+    if (!seen.has(line)) seen.set(line, now);
+    const row = document.createElement('div');
+    let cls = 'row';
+    if (line.includes('[ERROR]') || line.startsWith('·')) cls += ' err';
+    else if (line.startsWith('→')) cls += ' step';
+    else if (line.startsWith('✓')) cls += ' done';
+    else if (line.startsWith('●') || line.startsWith('▶') || line.startsWith('⏸') || line.startsWith('■')) cls += ' head';
+    row.className = cls;
+    const ts = document.createElement('span'); ts.className = 'ts'; ts.textContent = rel(seen.get(line), now);
+    const msg = document.createElement('span'); msg.className = 'msg'; msg.textContent = line;
+    row.appendChild(ts); row.appendChild(msg); box.appendChild(row);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+function rel(then, now) {
+  const s = Math.floor((now - then) / 1000);
+  if (s < 1) return 'now'; if (s < 60) return s + 's'; const m = Math.floor(s / 60);
+  return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h';
+}
+
+//──────────────────────────────────────── Semantic tree (center) ────────────────────────────────
+async function refreshTree(force) {
+  if (treeInFlight) return;
+  if (!force && document.hidden) return;
+  treeInFlight = true;
+  const scope = document.getElementById('scope').value;
+  try {
+    const { text } = await callTool('slug_snapshot', { scope });
+    renderTree(text || '');
+    treeAt = Date.now();
+    document.getElementById('treeAge').textContent = 'updated now';
+  } catch (e) {
+    setConn(false);
+    document.getElementById('tree').innerHTML = '<span class="err">snapshot error: ' + esc(e.message) + '</span>';
+  } finally { treeInFlight = false; }
+}
+
+const ROLE_CLASS = { window:'window', dialog:'window', button:'button', entry:'entry', textbox:'entry',
+  checkbox:'checkbox', radio:'checkbox', 'switch':'checkbox', text:'text', label:'text', link:'link',
+  menu:'menu', menuitem:'menu', combobox:'menu' };
+
+function renderTree(raw) {
+  const treeEl = document.getElementById('tree');
+  const opaqueEl = document.getElementById('opaque');
+  treeEl.className = 'tree';
+  if (!raw.trim()) { treeEl.className = 'tree empty'; treeEl.textContent = '(empty — nothing focused or no accessible tree)'; opaqueEl.innerHTML = ''; return; }
+
+  const lines = raw.split('\n');
+  let html = '', opaque = '';
+  let inOpaque = false;
+  for (const line of lines) {
+    if (line.startsWith('#')) { inOpaque = true; opaque += esc(line.replace(/^#\s?/, '')) + '\n'; continue; }
+    if (inOpaque) { opaque += esc(line.replace(/^#\s?/, '')) + '\n'; continue; }
+    if (!line.trim()) { continue; }
+    html += renderNodeLine(line) + '\n';
+  }
+  treeEl.innerHTML = html || '<span class="empty">(empty)</span>';
+  opaqueEl.innerHTML = opaque.trim() ? '<div class="opaque">⚠ opaque apps (no accessible tree — Slug cannot drive these):\n' + opaque + '</div>' : '';
+}
+
+// One YAML line → colored HTML. Format: `<indent>- <role> "<name>" [ref=x] [state]...`
+function renderNodeLine(line) {
+  const indentMatch = line.match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '';
+  let rest = line.slice(indent.length).replace(/^-\s*/, '');
+
+  // role = first token
+  const roleMatch = rest.match(/^([A-Za-z_]+)/);
+  const role = roleMatch ? roleMatch[1] : '';
+  rest = rest.slice(role.length);
+
+  // name in quotes (optional)
+  let name = '';
+  const nameMatch = rest.match(/^\s*"([^"]*)"/);
+  if (nameMatch) { name = nameMatch[1]; rest = rest.slice(nameMatch[0].length); }
+
+  // brackets: [ref=..] and [state]
+  let brackets = '';
+  const bracketRe = /\[([^\]]+)\]/g; let m;
+  while ((m = bracketRe.exec(rest)) !== null) {
+    const inner = m[1];
+    if (inner.startsWith('ref=')) {
+      const ref = inner.slice(4);
+      brackets += `<span class="ref" title="click to copy" onclick="copyRef(this,'${esc(ref)}')">${esc(ref)}</span>`;
+    } else {
+      brackets += `<span class="st ${esc(inner)}">${esc(inner)}</span>`;
+    }
+  }
+
+  const roleCls = ROLE_CLASS[role.toLowerCase()] || '';
+  const roleHtml = `<span class="role ${roleCls}">${esc(role)}</span>`;
+  const nameHtml = name ? ` <span class="name">"${esc(name)}"</span>` : '';
+  return `<span class="node">${indent}<span class="muted">- </span>${roleHtml}${nameHtml} ${brackets}</span>`;
+}
+
+function copyRef(el, ref) {
+  navigator.clipboard && navigator.clipboard.writeText(ref);
+  el.classList.add('copied'); const t = el.textContent; el.textContent = ref + ' ✓';
+  setTimeout(() => { el.classList.remove('copied'); el.textContent = t; }, 800);
+}
+
+//──────────────────────────────────────── Actions ───────────────────────────────────────────────
+async function startTask() {
   const input = document.getElementById('taskInput');
   const desc = input.value.trim();
   if (!desc) return;
   try { await callTool('slug_agent_start_task', { description: desc }); input.value = ''; }
   catch (e) { alert('Could not start task: ' + e.message); }
-  refresh();
+  refreshStatus();
 }
+async function ctl(name) { try { await callTool(name); } catch (e) {} refreshStatus(); }
 
-async function ctl(name) {
-  try { await callTool(name); } catch (e) { /* ignore */ }
-  refresh();
-}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-refresh();
-setInterval(refresh, 1000);
+// Refresh the tree immediately when the tab becomes visible again.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshTree(true); });
+
+// kick off
+refreshTree(true);
+loop();
 </script>
 </body>
 </html>

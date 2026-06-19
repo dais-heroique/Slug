@@ -168,6 +168,27 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "slug_key",
+            "description": "Send synthetic keyboard input to the focused app — a key \
+                chord (mode=chord, e.g. 'cmd+s', 'return', 'shift+tab', 'down') or \
+                literal text (mode=text). This drives ANY app, including opaque ones \
+                with no accessibility tree, and still captures NO pixels: it injects \
+                an OS input event, not a node action. Optionally focus a node first \
+                via 'ref'. (macOS implemented; Linux/Windows: follow-up.)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "keys": { "type": "string", "description": "Chord like 'cmd+shift+z', a key name like 'return'/'tab'/'escape'/'up', or literal text when mode=text." },
+                    "mode": { "type": "string", "enum": ["chord", "text"], "default": "chord",
+                              "description": "chord = key combo; text = type the string literally." },
+                    "ref": { "type": "string", "description": "Optional node ref to focus before sending input." },
+                    "reasoning": { "type": "string", "description": "Why (logged for auditing)." }
+                },
+                "required": ["keys"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "slug_wait_for",
             "description": "Block until a UI event occurs or the timeout elapses. \
                 Event types: node_created, node_destroyed, node_updated, focus_changed.",
@@ -244,6 +265,7 @@ async fn handle_tool_call(
     let result = match name {
         "slug_snapshot" => tool_snapshot(session, &args).await,
         "slug_invoke" => tool_invoke(session, &args).await,
+        "slug_key" => tool_key(session, &args).await,
         "slug_wait_for" => tool_wait_for(session, &args).await,
         "slug_list_apps" => tool_list_apps(session).await,
         name if name.starts_with("slug_agent_") => match control {
@@ -318,6 +340,17 @@ async fn tool_invoke(session: &Arc<Session>, args: &Value) -> std::result::Resul
     } else {
         format!("note: {action} on {r} was dispatched but the toolkit reported no effect")
     })
+}
+
+async fn tool_key(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
+    let keys = args.get("keys").and_then(Value::as_str).ok_or("missing 'keys'")?;
+    let mode = args.get("mode").and_then(Value::as_str).unwrap_or("chord");
+    let focus = args.get("ref").and_then(Value::as_str);
+    let reasoning = args.get("reasoning").and_then(Value::as_str);
+    let verb = if mode == "text" { "type_text" } else { "key" };
+
+    session.synth(verb, Some(keys), focus, reasoning).await.map_err(|e| e.to_string())?;
+    Ok(format!("ok: sent {mode} '{keys}' to the focused app"))
 }
 
 async fn tool_wait_for(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {

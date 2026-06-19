@@ -160,6 +160,32 @@ impl Session {
         Ok(bridge.invoke(&slug_ref, action, args, reasoning).await?)
     }
 
+    /// Inject synthetic OS input into the focused app. Drives **any** app —
+    /// including opaque ones with no accessibility tree — with no pixels involved.
+    /// If `focus_alias` is given, that node is focused first (so keys land in the
+    /// right field); otherwise the input goes to whatever the OS has focused.
+    pub async fn synth(
+        self: &Arc<Self>,
+        verb: &str,
+        args: Option<&str>,
+        focus_alias: Option<&str>,
+        reasoning: Option<&str>,
+    ) -> Result<bool> {
+        let bridge = self.ensure_bridge().await?;
+        if let Some(alias) = focus_alias {
+            let slug_ref = {
+                let state = self.state.lock().await;
+                state
+                    .aliases
+                    .ref_for(alias)
+                    .map(str::to_string)
+                    .ok_or_else(|| SessionError::UnknownAlias(alias.to_string()))?
+            };
+            bridge.invoke(&slug_ref, "focus", None, reasoning).await?;
+        }
+        Ok(bridge.synth_input(verb, args, reasoning).await?)
+    }
+
     /// List running accessible applications.
     pub async fn list_apps(self: &Arc<Self>) -> Result<Vec<slug_bridge::AppInfo>> {
         let bridge = self.ensure_bridge().await?;

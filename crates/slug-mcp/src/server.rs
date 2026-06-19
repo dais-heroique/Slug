@@ -86,8 +86,24 @@ pub async fn run_http(
 
     async fn mcp_endpoint(
         State(state): State<AppState>,
+        headers: axum::http::HeaderMap,
         body: axum::body::Bytes,
     ) -> axum::response::Response {
+        // Security: this localhost server can read screen content and drive the
+        // desktop, so it must not be reachable from a web page in the user's
+        // browser (DNS-rebinding / CSRF). Reject any request whose Origin or Host
+        // is not local. Non-browser clients (Claude Code, curl) send no Origin and
+        // a local Host, so they pass.
+        if !local_request_ok(&headers) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0", "id": null,
+                    "error": { "code": -32600, "message": "forbidden: non-local Origin/Host rejected" }
+                })),
+            )
+                .into_response();
+        }
         let req: JsonRpcRequest = match serde_json::from_slice(&body) {
             Ok(r) => r,
             Err(e) => {
@@ -109,6 +125,31 @@ pub async fn run_http(
 
     async fn dashboard() -> impl IntoResponse {
         ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], Html(DASHBOARD_HTML))
+    }
+
+    /// Accept a request only if it is local: any present `Origin` and `Host`
+    /// header must point at loopback. This blocks cross-site / DNS-rebinding
+    /// attacks while leaving local CLI clients (no Origin) untouched.
+    fn local_request_ok(headers: &axum::http::HeaderMap) -> bool {
+        fn host_is_local(h: &str) -> bool {
+            // Strip scheme and port, compare the host part only.
+            let h = h.strip_prefix("http://").or_else(|| h.strip_prefix("https://")).unwrap_or(h);
+            let host = h.split('/').next().unwrap_or(h);
+            let host = host.rsplit_once(':').map(|(a, _)| a).unwrap_or(host);
+            matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
+        }
+        if let Some(origin) = headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok()) {
+            // `null` and any non-local origin are rejected.
+            if !host_is_local(origin) {
+                return false;
+            }
+        }
+        if let Some(host) = headers.get(axum::http::header::HOST).and_then(|v| v.to_str().ok()) {
+            if !host_is_local(host) {
+                return false;
+            }
+        }
+        true
     }
 
     let app = Router::new()

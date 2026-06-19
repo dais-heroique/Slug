@@ -256,6 +256,10 @@ impl AccessibilityBackend for AxBackend {
         })
     }
 
+    fn synth_input<'a>(&'a self, action: &'a Action) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move { crate::synth_macos::perform_synth(action) })
+    }
+
     fn subscribe_events(&self, _sink: EventSink) -> BoxFuture<'_, Result<Subscription>> {
         Box::pin(async move {
             // Live AX events require an AXObserver (AXObserverCreate +
@@ -297,6 +301,11 @@ fn perform(el: AXUIElementRef, action: &Action) -> Result<()> {
             ax_set(el, kAXValueAttribute, CFString::new(text).as_CFType())
         }
         Action::SetValue(v) => ax_set(el, kAXValueAttribute, CFNumber::from(*v).as_CFType()),
+        // Synthetic input doesn't target a node; it's routed via `synth_input`.
+        Action::Key(_) | Action::TypeText(_) => Err(BridgeError::InvalidArgs {
+            action: action.id(),
+            detail: "synthetic input must go through synth_input, not a node ref".into(),
+        }),
     }
 }
 

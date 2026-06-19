@@ -36,6 +36,8 @@ pub mod error;
 pub mod backend_atspi;
 #[cfg(target_os = "macos")]
 pub mod backend_ax;
+#[cfg(target_os = "macos")]
+pub mod synth_macos;
 #[cfg(target_os = "windows")]
 pub mod backend_uia;
 
@@ -178,6 +180,28 @@ impl Bridge {
         let action = Action::parse(verb, arg)?;
         info!(%slug_ref, action = %action.id(), "invoke");
         self.backend.invoke(&BackendNodeId(slug_ref.to_string()), &action).await?;
+        Ok(true)
+    }
+
+    /// Inject synthetic OS input (key chord or literal text) into the focused
+    /// application. Works on any app, including opaque ones — no node ref, no
+    /// pixels. `verb` must be a synthetic verb (`key`/`hotkey`/`type_text`).
+    #[instrument(skip(self), fields(reasoning = reasoning.unwrap_or("")))]
+    pub async fn synth_input(
+        &self,
+        verb: &str,
+        arg: Option<&str>,
+        reasoning: Option<&str>,
+    ) -> Result<bool> {
+        let action = Action::parse(verb, arg)?;
+        if !action.is_synthetic() {
+            return Err(BridgeError::InvalidArgs {
+                action: action.id(),
+                detail: "not a synthetic-input verb (use key/hotkey/type_text)".into(),
+            });
+        }
+        info!(action = %action.id(), "synth_input");
+        self.backend.synth_input(&action).await?;
         Ok(true)
     }
 

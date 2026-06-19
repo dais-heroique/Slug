@@ -38,6 +38,9 @@ windows-core = "0.62"
 accessibility-sys = "0.2"
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
+# Synthetic keyboard input (CGEvent) so the agent can drive opaque apps with no
+# accessibility tree — key chords + literal text, never a screenshot.
+core-graphics = "0.24"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSEnumerator"] }
 objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication"] }

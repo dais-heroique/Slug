@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 
 use crate::action::Action;
 use crate::coverage::Coverage;
-use crate::error::Result;
+use crate::error::{BridgeError, Result};
 
 /// A boxed, `Send` future — the return type of the async backend methods.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -136,6 +136,23 @@ pub trait AccessibilityBackend: Send + Sync {
         node_id: &'a BackendNodeId,
         action: &'a Action,
     ) -> BoxFuture<'a, Result<()>>;
+
+    /// Inject synthetic OS input (a key chord or literal text) into the
+    /// **currently focused application**, independent of any node. This is what
+    /// lets the agent drive apps that expose no (or only a partial) accessibility
+    /// tree — without ever capturing a pixel. Only [`Action::Key`] and
+    /// [`Action::TypeText`] are valid here.
+    ///
+    /// The default implementation reports the platform does not support synthetic
+    /// input, so backends that don't implement it compile unchanged.
+    fn synth_input<'a>(&'a self, action: &'a Action) -> BoxFuture<'a, Result<()>> {
+        let _ = action;
+        Box::pin(async move {
+            Err(BridgeError::Unsupported(
+                "synthetic input is not implemented on this platform".to_string(),
+            ))
+        })
+    }
 
     /// Subscribe to live events; emitted as [`SlugEvent`]s on `sink`.
     fn subscribe_events(&self, sink: EventSink) -> BoxFuture<'_, Result<Subscription>>;

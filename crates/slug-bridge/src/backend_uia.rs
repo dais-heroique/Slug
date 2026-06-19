@@ -318,6 +318,12 @@ unsafe fn perform(el: &IUIAutomationElement, action: &Action) -> Result<()> {
                     })
                 }
             },
+            // Synthetic OS input is routed through `synth_input`, not node actions.
+            Action::Key(_) | Action::TypeText(_) => {
+                return Err(BridgeError::Unsupported(
+                    "synthetic input is not yet implemented on Windows".into(),
+                ))
+            }
         }
     }
     Ok(())

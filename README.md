@@ -138,6 +138,7 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 |------|-------|--------|
 | `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop" }` | The UI as a Playwright-style YAML tree; each node has a short `[ref=…]`. |
 | `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action. |
+| `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. See [Controlling any app](#controlling-any-app-synthetic-input). |
 | `slug_wait_for` | `{ "event_type"?: "focus_changed" \| …, "timeout_ms": 5000 }` | Blocks until a live UI event occurs or the timeout elapses. |
 | `slug_list_apps` | `{}` | Lists running applications exposing an accessibility tree. |
 | `slug_agent_start_task` | `{ "description": "…" }` | Starts the `slug-brain` agent on a task (see [Control dashboard](#mcp-native-control-dashboard)). |
@@ -170,6 +171,33 @@ It's cheaper, deterministic, and legible — the [control dashboard](#mcp-native
 renders the *exact same text* the agent reads, so a human supervising the agent
 sees no screenshots either. (This note is mirrored in the `slug_snapshot` MCP
 tool description so MCP clients see it too.)
+
+## Controlling any app (synthetic input)
+
+Most apps expose an accessibility tree, so the agent reads them with `slug_snapshot`
+and acts with `slug_invoke` on a `ref`. Some apps expose **no** (or only a partial)
+tree — games, some Electron/canvas apps — and show up as *opaque*. To drive those
+too, `slug_key` injects **synthetic OS keyboard input** into the focused app:
+
+```jsonc
+// a key chord (shortcuts, navigation): cmd+s, shift+tab, return, escape, up …
+{ "name": "slug_key", "arguments": { "keys": "cmd+s", "mode": "chord" } }
+// literal text typed into whatever has focus
+{ "name": "slug_key", "arguments": { "keys": "hello world", "mode": "text" } }
+// optionally focus an accessible field first, then type
+{ "name": "slug_key", "arguments": { "ref": "i1", "keys": "hello", "mode": "text" } }
+```
+
+This is still **no pixels and no model tokens**: it posts an OS input event, it does
+**not** capture or analyse the screen. It is the lightweight alternative to a
+screenshot+vision fallback — it works on any app the OS can route keystrokes to,
+without the cost and storage of images.
+
+Implemented on **macOS** (Quartz `CGEvent`; requires Accessibility — and on recent
+macOS, Input Monitoring — permission). Linux/Windows synthetic input is a documented
+follow-up; on those platforms `slug_key` returns a clear "not yet implemented" tool
+error (never a crash). The semantic path (`slug_snapshot`/`slug_invoke`) is the
+default and works everywhere.
 
 ## Connect Claude Code
 
@@ -357,10 +385,14 @@ A human can supervise and drive the agent through the **same MCP transport** —
 separate protocol. `slug-mcp` exposes agent-control tools (`slug_agent_start_task`,
 `slug_agent_status`, `slug_agent_pause`, `slug_agent_resume`, `slug_agent_stop`),
 and serves a tiny static dashboard at **`GET /dashboard`** (when run with
-`--http`). The dashboard:
+`--http`). It is a single self-contained HTML/JS file (no framework) laid out in
+three columns — **agent control** (task box, start/pause/resume/stop, live
+provider/tier/model badge, connection indicator), **semantic tree** (role-coloured,
+clickable `ref` chips, state pills, scope selector), and **action log** (reasoning/
+result lines, errors in red). It:
 
-- polls `slug_agent_status` every second (task, provider/tier/model, last 20
-  reasoning/action lines);
+- polls `slug_agent_status` (≈1 s while a task runs, throttled to 3 s when idle, and
+  paused entirely when the browser tab is hidden — low latency, low overhead);
 - renders the live semantic tree from `slug_snapshot` **as text** — the exact
   hierarchy the agent reads;
 - has a text box that calls `slug_agent_start_task`.
@@ -375,6 +407,15 @@ slug-mcp --http 127.0.0.1:7333      # then open http://127.0.0.1:7333/dashboard
 To avoid a crate cycle (`slug-brain` depends on `slug-mcp`), the controller drives
 `slug-agent --jsonl` as a child process and parses its JSON-lines event stream; set
 `SLUG_AGENT_BIN` if it isn't installed next to `slug-mcp`.
+
+### HTTP security
+
+The `slug-mcp` HTTP server can read on-screen content and drive the desktop, so it
+must never be reachable from a web page in your browser. It binds **loopback only**
+(`127.0.0.1`) and additionally validates the request **`Origin` and `Host`** on
+`POST /mcp`: any non-local value is rejected with `403`, blocking cross-site
+(CSRF) and DNS-rebinding attacks. Local CLI clients (Claude Code, `curl`) send no
+`Origin` and a local `Host`, so they pass unchanged.
 
 ## Install (macOS)
 

@@ -22,6 +22,14 @@ pub enum Action {
     SetValue(f64),
     /// Move focus to the node.
     Focus,
+    /// Synthetic key chord sent to the OS-focused app (e.g. `cmd+s`, `return`,
+    /// `tab`). Works on **any** app — including opaque ones with no accessibility
+    /// tree — because it injects an OS input event, not a node action. No pixels,
+    /// no screenshot.
+    Key(String),
+    /// Synthetic literal text typed into the OS-focused app (unicode). Same
+    /// "works on any app" property as [`Action::Key`].
+    TypeText(String),
 }
 
 impl Action {
@@ -41,6 +49,10 @@ impl Action {
                     })?;
                 Ok(Action::SetValue(n))
             }
+            "key" | "hotkey" | "keystroke" | "press_key" => {
+                Ok(Action::Key(arg.unwrap_or("").to_string()))
+            }
+            "type_text" | "synth_type" => Ok(Action::TypeText(arg.unwrap_or("").to_string())),
             "toggle" | "expand" | "collapse" | "check" | "uncheck" | "select" => {
                 Ok(Action::Named(v))
             }
@@ -56,7 +68,15 @@ impl Action {
             Action::SetText(_) => "set_text".into(),
             Action::SetValue(_) => "set_value".into(),
             Action::Focus => "focus".into(),
+            Action::Key(_) => "key".into(),
+            Action::TypeText(_) => "type_text".into(),
         }
+    }
+
+    /// Whether this action is synthetic OS input (targets the focused app, not a
+    /// specific node) — routed to [`crate::AccessibilityBackend::synth_input`].
+    pub fn is_synthetic(&self) -> bool {
+        matches!(self, Action::Key(_) | Action::TypeText(_))
     }
 }
 
@@ -72,5 +92,17 @@ mod tests {
         assert!(matches!(Action::parse("set_value", Some("0.5")).unwrap(), Action::SetValue(_)));
         assert!(Action::parse("set_value", Some("xyz")).is_err());
         assert!(matches!(Action::parse("toggle", None).unwrap(), Action::Named(_)));
+    }
+
+    #[test]
+    fn parses_synthetic_input() {
+        let k = Action::parse("key", Some("cmd+s")).unwrap();
+        assert!(matches!(&k, Action::Key(s) if s == "cmd+s"));
+        assert!(k.is_synthetic());
+        let t = Action::parse("type_text", Some("hello")).unwrap();
+        assert!(matches!(&t, Action::TypeText(s) if s == "hello"));
+        assert!(t.is_synthetic());
+        // Regular actions are not synthetic.
+        assert!(!Action::parse("click", None).unwrap().is_synthetic());
     }
 }

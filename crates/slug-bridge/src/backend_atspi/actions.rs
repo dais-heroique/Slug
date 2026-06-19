@@ -72,6 +72,12 @@ pub async fn perform(
                 .map_err(|_| BridgeError::InterfaceMissing("Component"))?;
             component.grab_focus().await?
         }
+        // Synthetic OS input is routed through `synth_input`, not node actions.
+        Action::Key(_) | Action::TypeText(_) => {
+            return Err(BridgeError::Unsupported(
+                "synthetic input is not yet implemented on Linux".into(),
+            ))
+        }
     };
 
     info!(success = outcome, "action executed");
