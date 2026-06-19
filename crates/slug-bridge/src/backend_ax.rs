@@ -26,11 +26,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use accessibility_sys::{
-    kAXChildrenAttribute, kAXEnabledAttribute, kAXFocusedAttribute, kAXPressAction,
-    kAXRoleAttribute, kAXTitleAttribute, kAXValueAttribute, kAXButtonRole, kAXCheckBoxRole,
-    kAXErrorSuccess, kAXMenuItemRole, kAXSliderRole, kAXTextFieldRole, kAXWindowRole,
-    AXIsProcessTrusted, AXUIElementCopyAttributeValue, AXUIElementCreateApplication,
-    AXUIElementPerformAction, AXUIElementRef, AXUIElementSetAttributeValue,
+    kAXChildrenAttribute, kAXEnabledAttribute, kAXFocusedAttribute, kAXPositionAttribute,
+    kAXPressAction, kAXRoleAttribute, kAXSizeAttribute, kAXTitleAttribute, kAXValueAttribute,
+    kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXButtonRole, kAXCheckBoxRole, kAXErrorSuccess,
+    kAXMenuItemRole, kAXSliderRole, kAXTextFieldRole, kAXWindowRole, AXIsProcessTrusted,
+    AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementPerformAction,
+    AXUIElementRef, AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef,
 };
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
@@ -39,7 +40,7 @@ use core_foundation::string::CFString;
 use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
 use core_foundation_sys::base::{CFRelease, CFRetain, CFTypeRef};
 use objc2_app_kit::{NSApplicationActivationPolicy, NSWorkspace};
-use slug_core::{derive_ref, SlugNode, SlugRole, SlugState};
+use slug_core::{derive_ref, Bounds, SlugNode, SlugRole, SlugState};
 use tracing::{info, warn};
 
 use crate::action::Action;
@@ -212,6 +213,7 @@ impl AccessibilityBackend for AxBackend {
                 if let Some(v) = value_attr(el.as_ref()) {
                     node.value = Some(v);
                 }
+                node.bounds = read_bounds(el.as_ref());
 
                 let children = ax_children(el.as_ref());
                 node.child_refs = children
@@ -298,10 +300,10 @@ impl AccessibilityBackend for AxBackend {
 /// Perform an action via AX.
 fn perform(el: AXUIElementRef, action: &Action) -> Result<()> {
     match action {
-        Action::Activate => ax_action(el, kAXPressAction),
+        Action::Activate => press_or_click(el),
         Action::Named(name) => match name.as_str() {
             "toggle" | "check" | "uncheck" | "select" | "expand" | "collapse" => {
-                ax_action(el, kAXPressAction)
+                press_or_click(el)
             }
             other => Err(BridgeError::ActionUnavailable {
                 slug_ref: String::new(),
@@ -320,6 +322,57 @@ fn perform(el: AXUIElementRef, action: &Action) -> Result<()> {
                 detail: "synthetic input must go through synth_input, not a node ref".into(),
             })
         }
+    }
+}
+
+/// Press the element via AX; if it exposes no press action, fall back to a
+/// synthetic mouse click at the centre of its bounds — so "click" works even on
+/// canvas/graphics nodes that have geometry but no accessibility action. No
+/// pixels are captured; the coordinates come from the element's own bounds.
+fn press_or_click(el: AXUIElementRef) -> Result<()> {
+    match ax_action(el, kAXPressAction) {
+        Ok(()) => Ok(()),
+        Err(e) => match read_bounds(el) {
+            Some(b) => crate::synth_macos::mouse_click(b.x + b.width / 2.0, b.y + b.height / 2.0),
+            None => Err(e),
+        },
+    }
+}
+
+/// Read a node's screen bounds from `AXPosition` + `AXSize` (AXValue wrappers).
+fn read_bounds(el: AXUIElementRef) -> Option<Bounds> {
+    #[repr(C)]
+    struct CgPoint {
+        x: f64,
+        y: f64,
+    }
+    #[repr(C)]
+    struct CgSize {
+        width: f64,
+        height: f64,
+    }
+    let pos = copy_attr(el, kAXPositionAttribute)?;
+    let size = copy_attr(el, kAXSizeAttribute)?;
+    let mut p = CgPoint { x: 0.0, y: 0.0 };
+    let mut s = CgSize { width: 0.0, height: 0.0 };
+    let okp = unsafe {
+        AXValueGetValue(
+            pos.as_CFTypeRef() as AXValueRef,
+            kAXValueTypeCGPoint,
+            &mut p as *mut _ as *mut std::ffi::c_void,
+        )
+    };
+    let oks = unsafe {
+        AXValueGetValue(
+            size.as_CFTypeRef() as AXValueRef,
+            kAXValueTypeCGSize,
+            &mut s as *mut _ as *mut std::ffi::c_void,
+        )
+    };
+    if okp && oks && (s.width > 0.0 || s.height > 0.0) {
+        Some(Bounds { x: p.x, y: p.y, width: s.width, height: s.height })
+    } else {
+        None
     }
 }
 

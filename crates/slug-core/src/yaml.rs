@@ -68,6 +68,17 @@ fn render_node(
         out.push(']');
     }
 
+    // For opaque surfaces (canvas/graphics: Generic/Image) that have geometry but
+    // typically no clickable child, expose the centre coordinate so the agent can
+    // `slug_click` into them. Kept off normal controls to avoid token bloat — those
+    // are clicked by ref.
+    if matches!(node.role, SlugRole::Generic | SlugRole::Image) {
+        if let Some(b) = node.bounds {
+            let (cx, cy) = (b.x + b.width / 2.0, b.y + b.height / 2.0);
+            out.push_str(&format!(" @{},{}", cx.round() as i64, cy.round() as i64));
+        }
+    }
+
     out.push('\n');
 
     for child in &node.child_refs {
@@ -132,6 +143,24 @@ mod tests {
   - entry \"name\" [ref=i1] [focused]
 ";
         assert_eq!(yaml, expected);
+    }
+
+    #[test]
+    fn renders_center_coords_for_opaque_surfaces_only() {
+        use crate::Bounds;
+        // A Generic surface (e.g. a canvas) with bounds gets a @cx,cy hint.
+        let mut canvas = SlugNode::new("C", SlugRole::Generic);
+        canvas.bounds = Some(Bounds { x: 100.0, y: 200.0, width: 40.0, height: 20.0 });
+        // A normal button with bounds does NOT (clicked by ref, saves tokens).
+        let mut btn = SlugNode::new("B", SlugRole::Button);
+        btn.name = Some("Save".into());
+        btn.bounds = Some(Bounds { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
+        btn.states = vec![SlugState::Enabled];
+        let doc = SlugDocument::from_nodes([canvas, btn]);
+        let mut aliases = AliasTable::new();
+        let yaml = doc.to_yaml_assigning(&mut aliases);
+        assert!(yaml.contains("@120,210"), "canvas center expected, got: {yaml}");
+        assert!(!yaml.contains("@5,5"), "button must not carry coords, got: {yaml}");
     }
 
     #[test]

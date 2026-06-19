@@ -192,6 +192,14 @@ So the flow is: `slug_launch Spotify` → `slug_snapshot focused` → find the p
 → `slug_invoke <ref> click` (or `slug_key`/`slug_click`). Each step verifies with a
 fresh snapshot.
 
+**Clicking opaque surfaces (canvas/graphics).** On macOS, `slug_invoke … click`
+auto-falls back to a synthetic mouse click at the node's centre when the element
+exposes geometry but no accessibility press action — so "click" works on canvas
+nodes too, with no extra calls. And for those opaque surfaces the snapshot prints
+a centre coordinate hint (`@x,y` after the node) so the agent can `slug_click x,y`
+a specific spot. Normal controls omit coordinates (clicked by ref — keeps the
+snapshot small).
+
 Most apps expose an accessibility tree, so the agent reads them with `slug_snapshot`
 and acts with `slug_invoke` on a `ref`. Some apps expose **no** (or only a partial)
 tree — games, some canvas apps — and show up as *opaque*. To drive those too,

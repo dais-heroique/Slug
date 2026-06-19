@@ -38,7 +38,7 @@ pub fn perform_synth(action: &Action) -> Result<()> {
 }
 
 /// Left-click at absolute screen coordinates.
-fn mouse_click(x: f64, y: f64) -> Result<()> {
+pub(crate) fn mouse_click(x: f64, y: f64) -> Result<()> {
     let src = source()?;
     let pt = CGPoint::new(x, y);
     let down = CGEvent::new_mouse_event(src.clone(), CGEventType::LeftMouseDown, pt, CGMouseButton::Left)
