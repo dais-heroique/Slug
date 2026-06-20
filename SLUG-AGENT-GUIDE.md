@@ -228,6 +228,45 @@ conflict:
    (or re-grep the latest saved file) and pull fresh refs. A ref from a previous
    snapshot is very likely stale.
 
+8. **Off-screen elements have negative X — ignore them.** In carousels and
+   horizontally-scrolled containers, nodes appear with coordinates like `@-500,479`.
+   Anything with X < 0 is off-screen. Only `slug_click` nodes where X ≥ 0 (or scroll
+   first to bring them on-screen).
+
+9. **Canvas apps (chess.com, maps, editors) have no accessible nodes — use `slug_click`
+   with coordinates.** For chess.com `/play/computer`, the grid maps as:
+   - columns: a=352 b=452 c=552 d=652 e=752 f=852 g=952 h=1052
+   - rows:    1=950  2=850  3=750  4=650  5=550  6=450  7=350  8=250
+   - move e2→e4: `slug_click {x:752, y:850}` then `slug_click {x:752, y:650}`
+   - read played moves: `grep "static_text.*[0-9]\."` in the snapshot.
+
+10. **If `slug_invoke` fails with error AX -25202** (action not supported), fall back to
+    `slug_click` with the `@X,Y` coordinates printed in the snapshot for that node.
+
+11. **Verify an action worked** by grepping the next snapshot for the expected result:
+    - Amazon add-to-cart: `grep "items in shopping basket"` → check the counter.
+    - Chess move played: `grep "static_text.*[0-9]\."` → read the move notation.
+    - Form saved: look for a confirmation message or state change in `static_text`.
+
+### App-specific fast paths
+
+**Amazon**
+```
+1. slug_launch Safari uri=https://www.amazon.fr/s?k=PRODUIT+ENCODE
+2. grep "button.*Add to basket\|ref=b" snapshot | head -30
+3. Match each "Add to basket" button to the product lines just above it; pick only those with X ≥ 0
+4. slug_invoke ref=bXXX action=click  (repeat for each item)
+```
+
+**Gmail — compose and send/draft**
+```
+1. slug_launch Safari uri=https://mail.google.com
+2. grep "button.*Compose" snapshot → slug_invoke click
+3. slug_snapshot scope=focused → grep "entry\|text_area\|combo_box"
+4. slug_invoke set_text on To, Subject, Body  (in that order)
+5. slug_invoke click on Send  OR  grep "Save & close\|image.*Save" → click to draft
+```
+
 ---
 
 ## 5. Safety you must respect

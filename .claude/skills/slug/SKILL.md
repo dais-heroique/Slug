@@ -155,29 +155,38 @@ claude mcp add --transport http slug http://127.0.0.1:7333/mcp
 { "mcpServers": { "slug": { "command": "/abs/path/target/release/slug-mcp", "args": ["--stdio"] } } }
 ```
 
-### Field-tested driving rules (real Mac runs)
+### Field-tested driving rules (real Mac runs — Safari, Gmail, Amazon, Chess.com)
 
-When you (or any connected agent) actually drive apps through these tools, follow
-these — they come from real Safari/Gmail runs and correct the idealized flow:
+Come from real app runs; these override idealized guidance where they conflict.
+Full version in `SLUG-AGENT-GUIDE.md` §4b.
 
-1. **Snapshots get huge — don't read them whole.** Saved to a file (curl/HTTP
-   workflow)? `grep` by role+keyword, never `cat`:
-   `grep -n "button" f | grep -i send`, `grep -n "entry\|combo_box\|text_area" f`,
-   `grep -n "heading\|link" f | grep -i inbox`. Over stdio, read only the line for
-   the role+name you want and grab its `ref`.
-2. **`slug_wait_for` times out a lot on real apps** — don't gate on it. After an
-   action, immediately `slug_snapshot {scope:"focused"}` instead of looping on
-   `wait_for`.
-3. **`slug_launch … uri=` straight onto the target state** to skip nav clicks
-   (Gmail compose `?view=cm&fs=1`, a pre-encoded Amazon search URL, a file/deep-link).
-4. **Fill forms in order:** `set_text` on every field first, then `click` submit
-   **last**.
-5. **`scope:"focused"` beats `window` for modals/sheets** (e.g. Gmail Compose) —
-   smaller, exact.
-6. **Refs are per-snapshot** — re-snapshot/re-grep after every action; never reuse
-   an old ref.
+1. **Snapshots get huge — grep, don't cat.**
+   `grep -n "button" f | grep -i send | head -40`
+   `grep -n "entry\|combo_box\|text_area" f`
+   `grep -n "heading\|link" f | grep -i inbox`
+   Over stdio: read only the line for the role+name you need, grab its `ref`.
+2. **`slug_wait_for` times out often** — skip it; immediately
+   `slug_snapshot {scope:"focused"}` after every action.
+3. **`slug_launch … uri=`** straight onto the target state (Gmail compose
+   `?view=cm&fs=1`, pre-encoded Amazon search, a file/deep-link).
+4. **Fill forms in order:** `set_text` every field first, `click` submit last.
+5. **`scope:"focused"` for modals/sheets** — smaller, exact.
+6. **Refs are per-snapshot** — re-snapshot/re-grep after every action; never
+   reuse an old ref.
+7. **Off-screen = negative X.** Elements in carousels appear as `@-500,479` etc.
+   Ignore anything with X < 0; scroll first if you need it.
+8. **Canvas apps (chess.com, maps)** have no accessible nodes — use `slug_click`
+   with screen coordinates. Chess.com grid: cols a–h = 352–1052 (step 100),
+   rows 1–8 = 950–250 (step -100). Move e2→e4: click (752,850) then (752,650).
+9. **AX -25202 fallback** — if `slug_invoke` fails with that code, use
+   `slug_click {x, y}` at the `@X,Y` coords printed in the snapshot for that node.
+10. **Verify with grep:** Amazon → `grep "items in shopping basket"`;
+    Chess move → `grep "static_text.*[0-9]\."`;
+    form saved → look for a `static_text` confirmation.
 
-These are written out in full in `SLUG-AGENT-GUIDE.md` §4b.
+**Fast paths:**
+- Amazon: `slug_launch … uri=amazon.fr/s?k=PRODUIT` → grep "Add to basket" → click.
+- Gmail compose: launch `?view=cm&fs=1` → snapshot focused → set_text To/Subject/Body → click Send.
 
 ---
 
