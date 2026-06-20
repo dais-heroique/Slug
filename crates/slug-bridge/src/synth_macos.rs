@@ -17,6 +17,7 @@
 
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
+    ScrollEventUnit,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
@@ -24,17 +25,33 @@ use core_graphics::geometry::CGPoint;
 use crate::action::Action;
 use crate::error::{BridgeError, Result};
 
-/// Perform a synthetic-input [`Action`] (`Key`, `TypeText`, or `MouseClick`).
+/// Perform a synthetic-input [`Action`].
 pub fn perform_synth(action: &Action) -> Result<()> {
     match action {
         Action::Key(spec) => key_chord(spec),
         Action::TypeText(text) => type_text(text),
         Action::MouseClick { x, y } => mouse_click(*x, *y),
+        Action::Scroll { x, y, dx, dy } => scroll(*x, *y, *dx, *dy),
         other => Err(BridgeError::InvalidArgs {
             action: other.id(),
             detail: "not a synthetic-input action".into(),
         }),
     }
+}
+
+/// Scroll at a screen point by `(dx, dy)` wheel lines (negative dy = down).
+fn scroll(x: f64, y: f64, dx: f64, dy: f64) -> Result<()> {
+    let src = source()?;
+    // Move the cursor over the target so the scroll lands on the right view.
+    if let Ok(mv) =
+        CGEvent::new_mouse_event(src.clone(), CGEventType::MouseMoved, CGPoint::new(x, y), CGMouseButton::Left)
+    {
+        mv.post(CGEventTapLocation::HID);
+    }
+    let ev = CGEvent::new_scroll_event(src, ScrollEventUnit::LINE, 2, dy as i32, dx as i32, 0)
+        .map_err(|_| BridgeError::Backend("CGEvent scroll failed".into()))?;
+    ev.post(CGEventTapLocation::HID);
+    Ok(())
 }
 
 /// Left-click at absolute screen coordinates.

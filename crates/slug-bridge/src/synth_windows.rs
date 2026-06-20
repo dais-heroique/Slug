@@ -11,28 +11,55 @@
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEINPUT, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_DOWN, VK_END,
-    VK_ESCAPE, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8,
-    VK_F9, VK_HOME, VK_LEFT, VK_LWIN, VK_MENU as VK_ALT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT,
-    VK_SHIFT, VK_SPACE, VK_TAB, VK_UP, VK_CONTROL,
+    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEINPUT, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL,
+    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_WHEEL, VIRTUAL_KEY,
+    VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3,
+    VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_LEFT, VK_LWIN, VK_MENU as VK_ALT,
+    VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP, VK_CONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
 use crate::action::Action;
 use crate::error::{BridgeError, Result};
 
-/// Perform a synthetic-input [`Action`] (`Key`, `TypeText`, or `MouseClick`).
+const WHEEL_DELTA: i32 = 120;
+
+/// Perform a synthetic-input [`Action`].
 pub fn perform_synth(action: &Action) -> Result<()> {
     match action {
         Action::Key(spec) => key_chord(spec),
         Action::TypeText(text) => type_text(text),
         Action::MouseClick { x, y } => mouse_click(*x, *y),
+        Action::Scroll { x, y, dx, dy } => scroll(*x, *y, *dx, *dy),
         other => Err(BridgeError::InvalidArgs {
             action: other.id(),
             detail: "not a synthetic-input action".into(),
         }),
     }
+}
+
+/// Scroll at a screen point by `(dx, dy)` wheel notches (negative dy = down).
+fn scroll(x: f64, y: f64, dx: f64, dy: f64) -> Result<()> {
+    let (sw, sh) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+    if sw <= 1 || sh <= 1 {
+        return Err(BridgeError::Backend("GetSystemMetrics returned no screen size".into()));
+    }
+    let nx = ((x * 65535.0) / (sw - 1) as f64).round() as i32;
+    let ny = ((y * 65535.0) / (sh - 1) as f64).round() as i32;
+    let wheel = |flags, data: i32| INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT { dx: nx, dy: ny, mouseData: data as u32, dwFlags: flags, time: 0, dwExtraInfo: 0 },
+        },
+    };
+    let mut inputs = vec![wheel(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 0)];
+    if dy != 0.0 {
+        inputs.push(wheel(MOUSEEVENTF_WHEEL | MOUSEEVENTF_ABSOLUTE, (dy * WHEEL_DELTA as f64) as i32));
+    }
+    if dx != 0.0 {
+        inputs.push(wheel(MOUSEEVENTF_HWHEEL | MOUSEEVENTF_ABSOLUTE, (dx * WHEEL_DELTA as f64) as i32));
+    }
+    send(&inputs)
 }
 
 /// Left-click at absolute screen coordinates (normalised to the primary screen).

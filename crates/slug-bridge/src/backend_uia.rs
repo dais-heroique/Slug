@@ -344,7 +344,7 @@ unsafe fn perform(el: &IUIAutomationElement, action: &Action) -> Result<()> {
             },
             // Synthetic OS input is routed through `synth_input` (SendInput), not
             // node actions; reaching it here means a caller mis-routed it.
-            Action::Key(_) | Action::TypeText(_) | Action::MouseClick { .. } => {
+            Action::Key(_) | Action::TypeText(_) | Action::MouseClick { .. } | Action::Scroll { .. } => {
                 return Err(BridgeError::InvalidArgs {
                     action: action.id(),
                     detail: "synthetic input must go through synth_input, not a node ref".into(),

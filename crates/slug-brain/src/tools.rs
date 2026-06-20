@@ -110,8 +110,8 @@ mod tests {
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
         // The agent's model sees every perception/action tool …
         for t in [
-            "slug_snapshot", "slug_invoke", "slug_launch", "slug_click", "slug_key",
-            "slug_wait_for", "slug_list_apps",
+            "slug_snapshot", "slug_invoke", "slug_launch", "slug_click", "slug_scroll",
+            "slug_key", "slug_wait_for", "slug_list_apps",
         ] {
             assert!(names.contains(&t), "agent should see {t}");
         }

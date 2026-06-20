@@ -30,6 +30,10 @@ struct AgentState {
     model: Option<String>,
     status: String,
     paused: bool,
+    steps: u64,
+    tokens: u64,
+    cost_usd: f64,
+    started_at: Option<std::time::Instant>,
     log: VecDeque<String>,
 }
 
@@ -87,6 +91,10 @@ impl AgentController {
         st.provider = None;
         st.tier = None;
         st.model = None;
+        st.steps = 0;
+        st.tokens = 0;
+        st.cost_usd = 0.0;
+        st.started_at = Some(std::time::Instant::now());
         st.log.clear();
         st.push_log(format!("▶ task: {description}"));
         st.child = Some(child);
@@ -127,6 +135,7 @@ impl AgentController {
         let st = self.state.lock().await;
         let recent: Vec<&String> = st.log.iter().rev().take(STATUS_LINES).collect();
         let recent: Vec<&String> = recent.into_iter().rev().collect();
+        let elapsed_s = st.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
         json!({
             "status": st.status,
             "paused": st.paused,
@@ -134,6 +143,10 @@ impl AgentController {
             "provider": st.provider,
             "tier": st.tier,
             "model": st.model,
+            "steps": st.steps,
+            "tokens": st.tokens,
+            "cost_usd": st.cost_usd,
+            "elapsed_s": elapsed_s,
             "log": recent,
         })
     }

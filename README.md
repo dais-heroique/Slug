@@ -148,6 +148,7 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 | `slug_launch` | `{ "name": "Spotify", "uri"?: "spotify:playlist:…" }` | **Launch** an app by name (and optionally open a URI / deep link). Slug otherwise only drives already-running apps. See [Controlling any app](#controlling-any-app-launch-keyboard-mouse). |
 | `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. |
 | `slug_click` | `{ "x": 640, "y": 360, "reasoning"?: "…" }` | Synthetic left mouse click at absolute screen coordinates — click **anywhere**, including opaque apps. No pixels. |
+| `slug_scroll` | `{ "x": 640, "y": 360, "dy": -3, "dx"?: 0 }` | Synthetic scroll at coordinates (negative `dy` = down) to reveal off-screen content (grids, lists). No pixels. |
 | `slug_wait_for` | `{ "event_type"?: "focus_changed" \| …, "timeout_ms": 5000 }` | Blocks until a live UI event occurs or the timeout elapses. |
 | `slug_list_apps` | `{}` | Lists running applications exposing an accessibility tree. |
 | `slug_agent_start_task` | `{ "description": "…" }` | Starts the `slug-brain` agent on a task (see [Control dashboard](#mcp-native-control-dashboard)). |

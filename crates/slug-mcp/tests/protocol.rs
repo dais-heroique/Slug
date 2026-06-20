@@ -35,8 +35,8 @@ async fn tools_list_exposes_the_perception_and_agent_tools() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     // The four perception/action tools …
     for expected in [
-        "slug_snapshot", "slug_invoke", "slug_launch", "slug_click", "slug_key",
-        "slug_wait_for", "slug_list_apps",
+        "slug_snapshot", "slug_invoke", "slug_launch", "slug_click", "slug_scroll",
+        "slug_key", "slug_wait_for", "slug_list_apps",
     ] {
         assert!(names.contains(&expected), "missing tool {expected}");
     }

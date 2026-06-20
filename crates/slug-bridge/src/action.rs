@@ -34,6 +34,10 @@ pub enum Action {
     /// click anywhere — including inside opaque apps — when it has a position
     /// (e.g. a node's `bounds`). No pixels are captured.
     MouseClick { x: f64, y: f64 },
+    /// Synthetic scroll at absolute screen coordinates by `(dx, dy)` wheel lines
+    /// (negative `dy` scrolls down). Reveals off-screen content — e.g. a grid item
+    /// that isn't visible yet.
+    Scroll { x: f64, y: f64, dx: f64, dy: f64 },
 }
 
 impl Action {
@@ -64,6 +68,10 @@ impl Action {
                 })?;
                 Ok(Action::MouseClick { x, y })
             }
+            "scroll" => parse_scroll(arg).ok_or_else(|| BridgeError::InvalidArgs {
+                action: "scroll".into(),
+                detail: "expected 'x,y,dy' or 'x,y,dx,dy'".into(),
+            }),
             "toggle" | "expand" | "collapse" | "check" | "uncheck" | "select" => {
                 Ok(Action::Named(v))
             }
@@ -82,13 +90,17 @@ impl Action {
             Action::Key(_) => "key".into(),
             Action::TypeText(_) => "type_text".into(),
             Action::MouseClick { .. } => "click_at".into(),
+            Action::Scroll { .. } => "scroll".into(),
         }
     }
 
     /// Whether this action is synthetic OS input (targets the focused app/screen,
     /// not a specific node) — routed to [`crate::AccessibilityBackend::synth_input`].
     pub fn is_synthetic(&self) -> bool {
-        matches!(self, Action::Key(_) | Action::TypeText(_) | Action::MouseClick { .. })
+        matches!(
+            self,
+            Action::Key(_) | Action::TypeText(_) | Action::MouseClick { .. } | Action::Scroll { .. }
+        )
     }
 }
 
@@ -97,6 +109,17 @@ fn parse_xy(arg: Option<&str>) -> Option<(f64, f64)> {
     let s = arg?.trim();
     let (a, b) = s.split_once(',').or_else(|| s.split_once(char::is_whitespace))?;
     Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+}
+
+/// Parse `"x,y,dy"` or `"x,y,dx,dy"` into a scroll action.
+fn parse_scroll(arg: Option<&str>) -> Option<Action> {
+    let nums: Vec<f64> =
+        arg?.split(',').filter_map(|s| s.trim().parse::<f64>().ok()).collect();
+    match nums.as_slice() {
+        [x, y, dy] => Some(Action::Scroll { x: *x, y: *y, dx: 0.0, dy: *dy }),
+        [x, y, dx, dy] => Some(Action::Scroll { x: *x, y: *y, dx: *dx, dy: *dy }),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -134,5 +157,21 @@ mod tests {
         assert!(matches!(Action::parse("click_at", Some("12 34")).unwrap(), Action::MouseClick { .. }));
         // Bad coords error.
         assert!(Action::parse("click_at", Some("nope")).is_err());
+    }
+
+    #[test]
+    fn parses_scroll() {
+        // x,y,dy (dx defaults to 0)
+        assert!(matches!(
+            Action::parse("scroll", Some("100,200,-3")).unwrap(),
+            Action::Scroll { x, y, dx, dy } if x == 100.0 && y == 200.0 && dx == 0.0 && dy == -3.0
+        ));
+        // x,y,dx,dy
+        assert!(matches!(
+            Action::parse("scroll", Some("1,2,3,4")).unwrap(),
+            Action::Scroll { dx, dy, .. } if dx == 3.0 && dy == 4.0
+        ));
+        assert!(Action::parse("scroll", Some("1,2")).is_err());
+        assert!(Action::parse("scroll", None).is_err());
     }
 }

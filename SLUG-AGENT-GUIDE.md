@@ -108,6 +108,15 @@ Synthetic left click at absolute screen coordinates — for clicking where there
 no accessible node (opaque apps, canvas). When a node IS accessible, prefer
 `slug_invoke <ref> click` (more robust). macOS + Windows; Linux OS-constrained.
 
+### `slug_scroll` — reveal off-screen content
+```json
+{ "x": 640, "y": 360, "dy": -3 }
+```
+Scroll at a point (negative `dy` scrolls down, positive up; optional `dx`). Use it
+when a target you expect (a grid tile, a list row) isn't in the snapshot: scroll
+over the relevant area, then re-`slug_snapshot`. This is the fix for "the item is
+there but off-screen" (e.g. a Canva design type not yet visible). macOS + Windows.
+
 ### `slug_key` — drive ANY app, including opaque ones
 ```json
 { "keys": "cmd+s", "mode": "chord" | "text", "ref": "i1", "reasoning": "why" }

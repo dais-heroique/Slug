@@ -40,7 +40,12 @@ Loop: observe → reason → act → verify.
     ({\"keys\":\"hello\",\"mode\":\"text\"}) — works even on apps with no tree.
   - slug_click {\"x\",\"y\"} only when there is no node to target (e.g. inside a \
     canvas), using an @x,y hint from the snapshot.
+  - slug_scroll {\"x\",\"y\",\"dy\"} to reveal content that isn't visible yet \
+    (negative dy scrolls down) — scroll over the relevant list/grid then re-snapshot.
   Always pass a short `reasoning` explaining why.
+- If a target you expect isn't in the snapshot, it may be off-screen or behind a \
+  search box: scroll the relevant area, or focus the app's search field (or press \
+  its search shortcut) and type the name, before giving up.
 - Verify: after each action a fresh post-action snapshot is returned to you — \
   check the state changed as expected before the next step. If not, re-observe.
 
@@ -211,6 +216,8 @@ impl Brain {
                         "args": tc.input,
                         "result": snippet,
                         "is_error": is_error,
+                        "tokens": self.budget.used_tokens,
+                        "cost_usd": self.budget.used_cost_usd,
                     }));
                 }
                 results.push(result);

@@ -205,6 +205,25 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "slug_scroll",
+            "description": "Synthetic scroll at screen coordinates (x, y) by dy wheel \
+                lines (negative dy scrolls DOWN, positive UP) and optional dx. Reveals \
+                off-screen content — e.g. a grid item or list entry not yet visible. No \
+                pixels. macOS + Windows implemented; Linux OS-constrained.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "x": { "type": "number", "description": "Screen X to scroll over." },
+                    "y": { "type": "number", "description": "Screen Y to scroll over." },
+                    "dy": { "type": "number", "description": "Vertical lines; negative = down." },
+                    "dx": { "type": "number", "description": "Horizontal lines (optional)." },
+                    "reasoning": { "type": "string", "description": "Why (logged)." }
+                },
+                "required": ["x", "y", "dy"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "slug_key",
             "description": "Send synthetic keyboard input to the focused app — a key \
                 chord (mode=chord, e.g. 'cmd+s', 'return', 'shift+tab', 'down') or \
@@ -304,6 +323,7 @@ async fn handle_tool_call(
         "slug_invoke" => tool_invoke(session, &args).await,
         "slug_launch" => tool_launch(session, &args).await,
         "slug_click" => tool_click(session, &args).await,
+        "slug_scroll" => tool_scroll(session, &args).await,
         "slug_key" => tool_key(session, &args).await,
         "slug_wait_for" => tool_wait_for(session, &args).await,
         "slug_list_apps" => tool_list_apps(session).await,
@@ -398,6 +418,19 @@ async fn tool_click(session: &Arc<Session>, args: &Value) -> std::result::Result
     let reasoning = args.get("reasoning").and_then(Value::as_str);
     session.synth("click_at", Some(&format!("{x},{y}")), None, reasoning).await.map_err(|e| e.to_string())?;
     Ok(format!("ok: clicked at {x},{y}"))
+}
+
+async fn tool_scroll(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
+    let x = args.get("x").and_then(Value::as_f64).ok_or("missing numeric 'x'")?;
+    let y = args.get("y").and_then(Value::as_f64).ok_or("missing numeric 'y'")?;
+    let dy = args.get("dy").and_then(Value::as_f64).ok_or("missing numeric 'dy'")?;
+    let dx = args.get("dx").and_then(Value::as_f64).unwrap_or(0.0);
+    let reasoning = args.get("reasoning").and_then(Value::as_str);
+    session
+        .synth("scroll", Some(&format!("{x},{y},{dx},{dy}")), None, reasoning)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(format!("ok: scrolled at {x},{y} by dx={dx} dy={dy}"))
 }
 
 async fn tool_key(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
