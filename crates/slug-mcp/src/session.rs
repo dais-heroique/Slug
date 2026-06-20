@@ -275,7 +275,12 @@ impl Session {
         };
 
         match tokio::time::timeout(deadline, fut).await {
-            Ok(Some(ev)) => Ok(Some(self.aliasize_event(ev).await)),
+            Ok(Some(ev)) => {
+                // A UI change was observed — drop the snapshot cache so the next
+                // snapshot reflects it immediately.
+                self.invalidate_cache().await;
+                Ok(Some(self.aliasize_event(ev).await))
+            }
             Ok(None) | Err(_) => Ok(None),
         }
     }

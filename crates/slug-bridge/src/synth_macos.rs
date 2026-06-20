@@ -62,14 +62,14 @@ fn type_text(text: &str) -> Result<()> {
         return Ok(());
     }
     let src = source()?;
-    // keycode 0 is a placeholder; the unicode payload is what gets delivered.
+    // keycode 0 is a placeholder; the unicode payload is delivered on the key-down.
+    // Setting the string on key-up too can double-insert in some apps, so we don't.
     let down = CGEvent::new_keyboard_event(src.clone(), 0, true)
         .map_err(|_| BridgeError::Backend("CGEvent keyboard (down) failed".into()))?;
     down.set_string(text);
     down.post(CGEventTapLocation::HID);
     let up = CGEvent::new_keyboard_event(src, 0, false)
         .map_err(|_| BridgeError::Backend("CGEvent keyboard (up) failed".into()))?;
-    up.set_string(text);
     up.post(CGEventTapLocation::HID);
     Ok(())
 }

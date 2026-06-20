@@ -132,10 +132,18 @@ pub async fn run_http(
     /// attacks while leaving local CLI clients (no Origin) untouched.
     fn local_request_ok(headers: &axum::http::HeaderMap) -> bool {
         fn host_is_local(h: &str) -> bool {
-            // Strip scheme and port, compare the host part only.
+            // Strip scheme and any path, then the port — keeping bracketed IPv6
+            // ([::1] / [::1]:port) intact — and compare the host only.
             let h = h.strip_prefix("http://").or_else(|| h.strip_prefix("https://")).unwrap_or(h);
             let host = h.split('/').next().unwrap_or(h);
-            let host = host.rsplit_once(':').map(|(a, _)| a).unwrap_or(host);
+            let host = if host.starts_with('[') {
+                // Bracketed IPv6: keep up to and including ']'.
+                host.find(']').map(|i| &host[..=i]).unwrap_or(host)
+            } else if let Some((a, _)) = host.rsplit_once(':') {
+                a
+            } else {
+                host
+            };
             matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
         }
         if let Some(origin) = headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok()) {

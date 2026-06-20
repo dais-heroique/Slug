@@ -23,8 +23,14 @@ Go to the repository's **Releases** page and download the file for your system:
 
 ### macOS (Slug.app)
 1. Unzip and drag **Slug.app** into `/Applications`.
-2. **Double-click Slug** — it starts the daemon and opens the dashboard.
-3. Grant permissions (one-time), then relaunch Slug:
+2. The build is **not notarized**, so Gatekeeper quarantines it. Clear the flag
+   once (Terminal):
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Slug.app
+   ```
+   (Or right-click **Slug.app → Open → Open** the first time.)
+3. **Double-click Slug** — it starts the daemon and opens the dashboard.
+4. Grant permissions (one-time), then relaunch Slug:
    - **System Settings → Privacy & Security → Accessibility** → add **Slug**, toggle **ON**
    - **System Settings → Privacy & Security → Input Monitoring** → add **Slug**, toggle **ON**
 
@@ -43,9 +49,11 @@ Go to the repository's **Releases** page and download the file for your system:
 ### Linux
 ```sh
 tar -xzf slug-*-linux-x86_64.tar.gz && cd slug-*-linux-x86_64
-./install.sh        # if present, or run the daemon directly:
 SLUG_AGENT_BIN="$PWD/slug-agent" ./slug-mcp --http 127.0.0.1:7333
 ```
+
+> macOS binary tarball: clear quarantine first —
+> `xattr -dr com.apple.quarantine slug-mcp slug slug-agent`.
 Enable toolkit accessibility so apps expose their trees:
 ```sh
 gsettings set org.gnome.desktop.interface toolkit-accessibility true

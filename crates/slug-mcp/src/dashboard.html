@@ -243,6 +243,9 @@ function renderLog(lines) {
     const msg = document.createElement('span'); msg.className = 'msg'; msg.textContent = line;
     row.appendChild(ts); row.appendChild(msg); box.appendChild(row);
   }
+  // Prune first-seen timestamps for lines no longer present (bounded memory).
+  const current = new Set(lines);
+  for (const k of seen.keys()) if (!current.has(k)) seen.delete(k);
   box.scrollTop = box.scrollHeight;
 }
 function rel(then, now) {
