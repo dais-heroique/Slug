@@ -189,6 +189,47 @@ before a `desktop` snapshot.
 
 ---
 
+## 4b. Field-tested rules (from real Mac runs — Safari, Gmail, …)
+
+These come from driving real apps and override the defaults above when they
+conflict:
+
+1. **A snapshot can be huge — never read the whole thing.** If you saved the
+   snapshot to a file (HTTP/curl workflow), `grep` it; don't cat it. Target by
+   role + keyword:
+   ```sh
+   grep -n "button"                      file | grep -i "send"  | head -40   # a button
+   grep -n "entry\|combo_box\|text_area" file                                # text fields
+   grep -n "heading\|link"               file | grep -i "inbox" | head -40   # titles/links
+   ```
+   When the snapshot comes back as an MCP tool result (stdio), read only the
+   lines you need — find the role+name, grab its `ref`, ignore the rest.
+
+2. **Don't trust `slug_wait_for` to land** — it times out more often than not on
+   real apps. After an action, **just call `slug_snapshot {scope:"focused"}`
+   right away** instead of waiting in a loop. Use `wait_for` only as a short,
+   optional nicety, never as a gate you depend on.
+
+3. **Open apps straight onto the right URL/state with `slug_launch … uri=`** to
+   skip navigation clicks — e.g. Gmail compose
+   `https://mail.google.com/mail/?view=cm&fs=1`, Amazon onto an already-encoded
+   search URL, or a file / deep-link for a native app.
+
+4. **Find refs by role + keyword**, exactly as in rule 1 — never eyeball the
+   whole tree.
+
+5. **Fill forms in a fixed order:** `slug_invoke set_text` on **every** field
+   first, *then* `click` the submit/save button last. Don't submit between fields.
+
+6. **`scope:"focused"` beats `window` when a modal/sheet is open** (e.g. the
+   Gmail Compose window) — it's smaller and targets exactly the active surface.
+
+7. **Refs are per-snapshot — never reuse old ones.** After any action, re-snapshot
+   (or re-grep the latest saved file) and pull fresh refs. A ref from a previous
+   snapshot is very likely stale.
+
+---
+
 ## 5. Safety you must respect
 
 - **Destructive actions** (`delete`, `send`, `purchase`, `submit`, `discard`, …)

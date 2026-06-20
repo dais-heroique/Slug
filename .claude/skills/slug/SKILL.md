@@ -155,6 +155,30 @@ claude mcp add --transport http slug http://127.0.0.1:7333/mcp
 { "mcpServers": { "slug": { "command": "/abs/path/target/release/slug-mcp", "args": ["--stdio"] } } }
 ```
 
+### Field-tested driving rules (real Mac runs)
+
+When you (or any connected agent) actually drive apps through these tools, follow
+these — they come from real Safari/Gmail runs and correct the idealized flow:
+
+1. **Snapshots get huge — don't read them whole.** Saved to a file (curl/HTTP
+   workflow)? `grep` by role+keyword, never `cat`:
+   `grep -n "button" f | grep -i send`, `grep -n "entry\|combo_box\|text_area" f`,
+   `grep -n "heading\|link" f | grep -i inbox`. Over stdio, read only the line for
+   the role+name you want and grab its `ref`.
+2. **`slug_wait_for` times out a lot on real apps** — don't gate on it. After an
+   action, immediately `slug_snapshot {scope:"focused"}` instead of looping on
+   `wait_for`.
+3. **`slug_launch … uri=` straight onto the target state** to skip nav clicks
+   (Gmail compose `?view=cm&fs=1`, a pre-encoded Amazon search URL, a file/deep-link).
+4. **Fill forms in order:** `set_text` on every field first, then `click` submit
+   **last**.
+5. **`scope:"focused"` beats `window` for modals/sheets** (e.g. Gmail Compose) —
+   smaller, exact.
+6. **Refs are per-snapshot** — re-snapshot/re-grep after every action; never reuse
+   an old ref.
+
+These are written out in full in `SLUG-AGENT-GUIDE.md` §4b.
+
 ---
 
 ## 4. The CLI (`slug`)
