@@ -136,7 +136,7 @@ Pattern for "open Spotify and play my playlist": `slug_launch {name:"Spotify"}` 
 ```
 Synthetic left click at absolute screen coordinates — for clicking where there is
 no accessible node (opaque apps, canvas). When a node IS accessible, prefer
-`slug_invoke <ref> click` (more robust). macOS + Windows; Linux OS-constrained.
+`slug_invoke <ref> click` (more robust). macOS + Windows; Linux via xdotool/ydotool.
 
 ### `slug_scroll` — reveal off-screen content
 ```json
@@ -161,8 +161,11 @@ tokens** (it injects an OS event, never a screenshot).
 
 Pattern for an opaque app: bring it to the front / focus its field if you can,
 then `slug_key`. For shortcuts in any app: just `slug_key {keys:"cmd+s"}`.
-(Implemented on macOS + Windows; on Linux it returns a clear error — Wayland
-blocks synthetic input by design, so use the semantic path there.)
+(Implemented in-process on macOS + Windows. On Linux, Wayland blocks in-process
+injection, so Slug shells out to **`xdotool`** (X11/XWayland — full support) or
+**`ydotool`** (Wayland — text + click); if neither is installed it returns a clear
+error telling you to install one or use the semantic path. `cmd` maps to `ctrl`
+on Linux.)
 
 ### `slug_wait_for`
 ```json

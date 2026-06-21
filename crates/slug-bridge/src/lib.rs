@@ -35,6 +35,8 @@ pub mod launch;
 
 #[cfg(target_os = "linux")]
 pub mod backend_atspi;
+#[cfg(target_os = "linux")]
+pub mod synth_linux;
 #[cfg(target_os = "macos")]
 pub mod backend_ax;
 #[cfg(target_os = "macos")]

@@ -67,6 +67,13 @@ Enable toolkit accessibility so apps expose their trees:
 ```sh
 gsettings set org.gnome.desktop.interface toolkit-accessibility true
 ```
+For **synthetic input** (`slug_click` / `slug_key` / `slug_scroll`), install an
+input tool — Wayland blocks in-process injection, so Slug shells out to one:
+```sh
+sudo apt install xdotool      # X11 / XWayland — full support (keys, text, click, scroll)
+# or, on a pure-Wayland session: sudo apt install ydotool   # text + click (needs the ydotoold daemon)
+```
+Reading the UI and `slug_invoke` on a ref need neither — they work regardless.
 Then open <http://127.0.0.1:7333/dashboard>.
 
 ---

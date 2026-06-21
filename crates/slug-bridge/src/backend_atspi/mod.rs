@@ -142,6 +142,12 @@ impl AccessibilityBackend for AtspiBackend {
         })
     }
 
+    fn synth_input<'a>(&'a self, action: &'a Action) -> BoxFuture<'a, Result<()>> {
+        // Wayland blocks in-process injection; route to a system input tool
+        // (xdotool / ydotool) when one is installed, else a clear error.
+        Box::pin(async move { crate::synth_linux::synth(action) })
+    }
+
     fn subscribe_events(&self, sink: EventSink) -> BoxFuture<'_, Result<Subscription>> {
         Box::pin(async move {
             // Dedicated connection so harvesting and eventing don't contend.
