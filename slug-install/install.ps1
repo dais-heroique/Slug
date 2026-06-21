@@ -98,8 +98,11 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 # The daemon also finds slug-agent next to itself, so this is belt-and-braces.
 setx SLUG_AGENT_BIN (Join-Path $BinDir "slug-agent.exe") | Out-Null
 setx SLUG_CONFIG $Config | Out-Null
+# Destructive actions from external clients: ask (approve in dashboard) | deny | allow
+if (-not $env:SLUG_DESTRUCTIVE) { setx SLUG_DESTRUCTIVE "ask" | Out-Null }
 $env:SLUG_AGENT_BIN = Join-Path $BinDir "slug-agent.exe"
 $env:SLUG_CONFIG = $Config
+if (-not $env:SLUG_DESTRUCTIVE) { $env:SLUG_DESTRUCTIVE = "ask" }
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description "Slug semantic-bus daemon" | Out-Null
 Say "registered logon task '$TaskName'"

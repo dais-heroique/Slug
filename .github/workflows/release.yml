@@ -54,13 +54,18 @@ jobs:
           cp target/release/slug-mcp target/release/slug target/release/slug-agent "$OUT/$STAGE/"
           cp slug-install/install.sh "$OUT/$STAGE/" 2>/dev/null || true
           cp INSTALL.md README.md "$OUT/$STAGE/" 2>/dev/null || true
-          # macOS: also build a double-clickable Slug.app
+          # macOS: also build a double-clickable Slug.app, a zip, and a drag-to-
+          # install .dmg (signed/notarized automatically if the secrets are set).
           if [ "${{ runner.os }}" = "macOS" ]; then
             bash slug-install/make-macos-app.sh "target/release" "$OUT"
             ( cd "$OUT" && zip -r "Slug-${VER}-${{ matrix.name }}.app.zip" "Slug.app" )
+            bash slug-install/make-macos-dmg.sh "$OUT/Slug.app" "$OUT/Slug-${VER}-${{ matrix.name }}.dmg"
           fi
           tar -C "$OUT" -czf "$OUT/$STAGE.tar.gz" "$STAGE"
           ls -la "$OUT"
+        env:
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          AC_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
 
       # ---- Package (Windows) -----------------------------------------------
       - name: Package (Windows)
@@ -76,6 +81,23 @@ jobs:
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/slug-$ver-${{ matrix.name }}.zip" -Force
           Get-ChildItem dist
 
+      # ---- Windows installer (.exe) via Inno Setup -------------------------
+      - name: Build Windows installer (.exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME; if (-not $ver) { $ver = "0.1.0" }
+          $verNum = $ver.TrimStart('v')
+          $payload = "slug-install/windows/payload"
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          Copy-Item target/release/slug-mcp.exe,target/release/slug.exe,target/release/slug-agent.exe $payload
+          choco install innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & "$iscc" "/DMyAppVersion=$verNum" "slug-install/windows/slug.iss"
+          # slug.iss writes dist/SlugSetup.exe — give it a versioned name too.
+          Copy-Item "dist/SlugSetup.exe" "dist/SlugSetup-$ver-${{ matrix.name }}.exe" -Force
+          Get-ChildItem dist
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -83,6 +105,8 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.dmg
+            dist/SlugSetup-*.exe
 
       - name: Publish to Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -91,4 +115,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.dmg
+            dist/SlugSetup-*.exe
           generate_release_notes: true

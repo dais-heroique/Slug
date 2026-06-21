@@ -15,16 +15,19 @@ Go to the repository's **Releases** page and download the file for your system:
 
 | System | File | What it is |
 |--------|------|------------|
-| **macOS (Apple Silicon)** | `Slug-<ver>-macos-arm64.app.zip` | Double-clickable **Slug.app** |
-| **macOS (Intel)** | `Slug-<ver>-macos-x86_64.app.zip` | Double-clickable **Slug.app** |
+| **macOS (Apple Silicon)** | `Slug-<ver>-macos-arm64.dmg` | Drag-to-install **disk image** (recommended) |
+| **macOS (Intel)** | `Slug-<ver>-macos-x86_64.dmg` | Drag-to-install **disk image** |
+| **macOS (zip)** | `Slug-<ver>-macos-*.app.zip` | Same **Slug.app**, zipped |
 | **macOS (binaries)** | `slug-<ver>-macos-*.tar.gz` | Binaries + `install.sh` |
-| **Windows** | `slug-<ver>-windows-x86_64.zip` | Binaries + `install.ps1` |
+| **Windows (installer)** | `SlugSetup-<ver>-windows-x86_64.exe` | One-click **installer** (recommended) |
+| **Windows (zip)** | `slug-<ver>-windows-x86_64.zip` | Binaries + `install.ps1` |
 | **Linux** | `slug-<ver>-linux-x86_64.tar.gz` | Binaries + `install.sh` |
 
-### macOS (Slug.app)
-1. Unzip and drag **Slug.app** into `/Applications`.
-2. The build is **not notarized**, so Gatekeeper quarantines it. Clear the flag
-   once (Terminal):
+### macOS (.dmg / Slug.app)
+1. Open the **`.dmg`** and drag **Slug.app** onto **Applications** (or unzip the
+   `.app.zip` and move Slug.app into `/Applications`).
+2. Unless the build was signed/notarized, Gatekeeper quarantines it. Clear the
+   flag once (Terminal):
    ```sh
    xattr -dr com.apple.quarantine /Applications/Slug.app
    ```
@@ -39,6 +42,12 @@ Go to the repository's **Releases** page and download the file for your system:
    > Screen Recording is **not** required.
 
 ### Windows
+**Installer (recommended):** double-click **`SlugSetup-<ver>-windows-x86_64.exe`**
+and follow the wizard. It installs per-user (no admin), sets up `%USERPROFILE%\.slug`,
+registers the logon daemon, and offers to open the dashboard. Uninstall from
+*Apps & features* like any program.
+
+**Or from the zip:**
 1. Unzip the folder anywhere.
 2. Right-click **`install.ps1` → Run with PowerShell** (or:
    `powershell -ExecutionPolicy Bypass -File .\install.ps1`).
@@ -129,5 +138,22 @@ local Ollama models (nothing is downloaded by Slug).
 ## Uninstalling
 
 - **macOS:** `./slug-install/install.sh uninstall` (or delete `Slug.app` + `~/.slug`).
-- **Windows:** `powershell -File .\slug-install\install.ps1 -Uninstall`.
+- **Windows:** uninstall **Slug** from *Apps & features* (installer build), or
+  `powershell -File .\slug-install\install.ps1 -Uninstall` (zip build).
 - **Linux:** stop the daemon and remove the extracted folder / `~/.slug`.
+
+---
+
+## Signed / notarized macOS builds (maintainers)
+
+The release `.dmg` is unsigned by default (users clear quarantine once, above).
+To ship a signed + notarized image, add these **GitHub repository secrets** and
+re-run the release — the workflow picks them up automatically:
+
+- `MACOS_SIGN_IDENTITY` — e.g. `Developer ID Application: Your Name (TEAMID)`
+  (the certificate must be importable into the runner keychain; add the import
+  step with your `.p12` before packaging).
+- `MACOS_NOTARY_PROFILE` — a `notarytool` keychain profile name for
+  notarization + stapling.
+
+When both are absent, the build stays unsigned and everything still works.
