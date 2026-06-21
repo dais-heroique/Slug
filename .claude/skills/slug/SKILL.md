@@ -109,7 +109,7 @@ Run it:
 
 | Tool | Input | Result |
 |------|-------|--------|
-| `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop" }` (default `window`) | UI as Playwright-style YAML tree; each node has a short `[ref=…]`. Not a screenshot. |
+| `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop", "filter"?: "send", "roles"?: ["button"], "interactive_only"?: true, "limit"?: 50 }` (default scope `window`) | UI as Playwright-style YAML tree; each node has a short `[ref=…]`. Not a screenshot. **With `filter`/`roles`/`interactive_only` it returns a compact FLAT list of just the matching nodes (each with `ref` + centre `@x,y`) — the server-side "grep" fast path that avoids shipping the whole 80k-char tree.** |
 | `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action (`toggle`, `expand`, `select`, …). `ref` + `action` required. |
 | `slug_launch` | `{ "name": "Spotify", "uri"?: "spotify:playlist:…" }` | **Launch** an app by name (+ optional URI/deep link). Slug otherwise only drives running apps. Works without the a11y bus. Cross-platform (open / start / xdg-open). |
 | `slug_click` | `{ "x": 640, "y": 360, "reasoning"?: "…" }` | Synthetic left mouse click at absolute screen coords — click anywhere incl. opaque apps. macOS (CGEvent) + Windows (SendInput); Linux OS-constrained. |
@@ -160,11 +160,12 @@ claude mcp add --transport http slug http://127.0.0.1:7333/mcp
 Come from real app runs; these override idealized guidance where they conflict.
 Full version in `SLUG-AGENT-GUIDE.md` §4b.
 
-1. **Snapshots get huge — grep, don't cat.**
-   `grep -n "button" f | grep -i send | head -40`
-   `grep -n "entry\|combo_box\|text_area" f`
-   `grep -n "heading\|link" f | grep -i inbox`
-   Over stdio: read only the line for the role+name you need, grab its `ref`.
+1. **Snapshots get huge — filter server-side, don't pull the whole tree.** Pass
+   `filter` (substring), `roles` (e.g. `["button"]`, `["entry","combo_box"]`,
+   `["static_text"]`) and/or `interactive_only:true` to `slug_snapshot`; you get a
+   compact flat list of just the matches, each with `[ref=…]` AND `@x,y`. The grep
+   now runs inside the server — this is the #1 speed win. (Client-side `grep` on a
+   saved file is only for the raw curl workflow.)
 2. **`slug_wait_for` times out often** — skip it; immediately
    `slug_snapshot {scope:"focused"}` after every action.
 3. **`slug_launch … uri=`** straight onto the target state (Gmail compose
@@ -178,15 +179,20 @@ Full version in `SLUG-AGENT-GUIDE.md` §4b.
 8. **Canvas apps (chess.com, maps)** have no accessible nodes — use `slug_click`
    with screen coordinates. Chess.com grid: cols a–h = 352–1052 (step 100),
    rows 1–8 = 950–250 (step -100). Move e2→e4: click (752,850) then (752,650).
+   Read moves with `slug_snapshot {roles:["static_text"], limit:200}` (tiny), never
+   the full board — it's a canvas with no nodes anyway.
 9. **AX -25202 fallback** — if `slug_invoke` fails with that code, use
-   `slug_click {x, y}` at the `@X,Y` coords printed in the snapshot for that node.
-10. **Verify with grep:** Amazon → `grep "items in shopping basket"`;
-    Chess move → `grep "static_text.*[0-9]\."`;
-    form saved → look for a `static_text` confirmation.
+   `slug_click {x, y}` at the `@x,y` coords (a filtered snapshot prints them on
+   every line).
+10. **Verify with a filtered snapshot, not the full tree:** Amazon →
+    `{filter:"items in basket"}`; chess → `{roles:["static_text"],limit:200}`;
+    form saved → `{filter:"saved"}` or the field's new state.
 
 **Fast paths:**
-- Amazon: `slug_launch … uri=amazon.fr/s?k=PRODUIT` → grep "Add to basket" → click.
-- Gmail compose: launch `?view=cm&fs=1` → snapshot focused → set_text To/Subject/Body → click Send.
+- Chess blitz: per move just `slug_click from` then `slug_click to`; only read the
+  reply with `slug_snapshot {roles:["static_text"],limit:200}`. No full snapshots.
+- Amazon: `slug_launch … uri=amazon.fr/s?k=PRODUIT` → `slug_snapshot {roles:["button"],filter:"basket"}` → invoke the row's ref.
+- Gmail compose: launch `?view=cm&fs=1` → `slug_snapshot {roles:["entry","combo_box"]}` → set_text To/Subject/Body → `{roles:["button"],filter:"send"}` → click.
 
 ---
 

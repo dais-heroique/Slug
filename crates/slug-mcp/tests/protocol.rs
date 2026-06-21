@@ -68,6 +68,45 @@ async fn snapshot_tool_clarifies_it_is_not_a_screenshot() {
 }
 
 #[tokio::test]
+async fn snapshot_tool_advertises_server_side_filter() {
+    let session = Session::new();
+    let resp = handle(&session, req(9, "tools/list", json!({}))).await.expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    let tools = v["result"]["tools"].as_array().unwrap();
+    let snap = tools.iter().find(|t| t["name"] == "slug_snapshot").unwrap();
+    let props = &snap["inputSchema"]["properties"];
+    // The fast-path filter params must be discoverable by the model.
+    assert!(props["filter"].is_object(), "filter param missing");
+    assert!(props["roles"].is_object(), "roles param missing");
+    assert!(props["interactive_only"].is_object(), "interactive_only param missing");
+    assert!(props["limit"].is_object(), "limit param missing");
+    assert_eq!(props["roles"]["type"], "array");
+}
+
+#[tokio::test]
+async fn filtered_snapshot_without_bus_is_an_iserror_result() {
+    // A filtered snapshot still needs the bus; it must fail as an isError tool
+    // result (not a protocol error), exactly like an unfiltered one.
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(
+            10,
+            "tools/call",
+            json!({
+                "name": "slug_snapshot",
+                "arguments": { "scope": "focused", "filter": "basket", "roles": ["button"] }
+            }),
+        ),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+}
+
+#[tokio::test]
 async fn notifications_get_no_response() {
     let session = Session::new();
     let resp = handle(&session, req_notification("notifications/initialized")).await;

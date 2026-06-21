@@ -33,6 +33,12 @@ Loop: observe → reason → act → verify.
   window. Each interactive node shows a [ref=…]; opaque surfaces may show @x,y. \
   Prefer focused/window scope to keep context small; use desktop scope only to \
   find another app.
+  - FAST PATH: real pages are huge. To find a specific control, narrow the \
+    snapshot server-side with filter (substring on the name), roles (e.g. \
+    [\"button\"], [\"entry\",\"combo_box\"], [\"static_text\"]) and/or \
+    interactive_only:true. You then get a compact flat list of just the matching \
+    nodes, each already carrying its [ref=…] AND a centre @x,y. Use this instead of \
+    reading the whole tree — it is far faster and cheaper.
 - Act, in order of preference:
   - slug_invoke with the node's ref and an action (click, focus, set_text, \
     set_value, toggle, …) — this is the precise, preferred way to act on controls.

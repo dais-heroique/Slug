@@ -14,4 +14,4 @@ pub mod server;
 pub mod session;
 
 pub use agent::AgentController;
-pub use session::{Scope, Session, SessionError};
+pub use session::{Scope, Session, SessionError, SnapshotFilter};

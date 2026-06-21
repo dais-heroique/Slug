@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tracing::{debug, warn};
 
 use crate::agent::AgentController;
-use crate::session::{Scope, Session};
+use crate::session::{Scope, Session, SnapshotFilter};
 
 /// The MCP protocol revision we advertise.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -109,14 +109,21 @@ fn initialize_result() -> Value {
         "serverInfo": { "name": "slug-mcp", "version": env!("CARGO_PKG_VERSION") },
         "instructions": "Slug exposes the OS accessibility tree as a semantic \
             document (text, never a screenshot). Logical workflow: (1) slug_launch \
-            to open an app by name if it isn't running; (2) slug_snapshot (scope \
-            'focused' is smallest/fastest) to read the UI as YAML — each node has a \
-            short [ref=...]; (3) act: slug_invoke <ref> click/set_text/set_value/focus \
-            for accessible controls, slug_key for keyboard chords or text, slug_click \
-            x,y for a mouse click anywhere; (4) verify with a fresh slug_snapshot. \
-            Use slug_wait_for to await UI changes and slug_list_apps to see running \
-            apps. Prefer slug_invoke on a ref over slug_click coordinates when a node \
-            exists. Always snapshot focused, act on refs, then re-snapshot to confirm."
+            to open an app by name (use uri= to jump straight to the right page/state \
+            and skip clicks) if it isn't running; (2) slug_snapshot (scope 'focused' \
+            is smallest/fastest) to read the UI — but pages can be tens of thousands \
+            of characters, so to FIND a control pass filter='text' and/or \
+            roles=['button'|'entry'|'link'|...] and/or interactive_only=true: this \
+            returns a compact flat list of just the matching nodes, each with its \
+            [ref=...] AND a centre @x,y. Use that instead of reading the whole tree; \
+            (3) act: slug_invoke <ref> click/set_text/set_value/focus for accessible \
+            controls, slug_key for keyboard chords or text, slug_click x,y for a mouse \
+            click anywhere (use the @x,y from a filtered snapshot — this is also the \
+            fallback when slug_invoke fails on canvas/opaque apps like chess.com or \
+            maps); (4) verify with another filtered slug_snapshot. slug_wait_for is \
+            unreliable on real apps — after an action just snapshot again rather than \
+            waiting. Prefer slug_invoke on a ref over coordinates when a node exists; \
+            refs are per-snapshot, never reuse old ones."
     })
 }
 
@@ -131,7 +138,12 @@ pub fn tool_definitions() -> Vec<Value> {
                 analogous to a database snapshot. No image, pixel, or OCR is involved \
                 anywhere in the pipeline. Each interactive node carries a short \
                 [ref=...] used by slug_invoke. Apps with no accessible tree are \
-                reported as opaque (vision needed).",
+                reported as opaque (vision needed). SPEED: a full web page can be \
+                tens of thousands of characters — to find one control fast, pass \
+                'filter' (text), 'roles' (e.g. [\"button\",\"entry\"]) and/or \
+                'interactive_only', which return a compact FLAT list of just the \
+                matching nodes, each with its ref AND centre @x,y (for slug_click). \
+                Prefer that over reading the whole tree.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -141,6 +153,31 @@ pub fn tool_definitions() -> Vec<Value> {
                         "description": "focused/window = the focused top-level window; \
                             desktop = every running application.",
                         "default": "window"
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": "Case-insensitive substring matched against each \
+                            node's name/label. Returns a compact flat list of matches \
+                            (with ref + @x,y) instead of the whole tree — the fast way \
+                            to locate a button/field/link by its text."
+                    },
+                    "roles": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Keep only these roles, lower-case as shown in \
+                            snapshots, e.g. [\"button\"], [\"entry\",\"combo_box\"], \
+                            [\"static_text\"], [\"link\",\"heading\"]. Combine with filter."
+                    },
+                    "interactive_only": {
+                        "type": "boolean",
+                        "description": "Keep only directly actionable controls (buttons, \
+                            fields, links, checkboxes, …) — drops static text/containers."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 50,
+                        "description": "Max nodes returned in filtered mode (default 50)."
                     }
                 },
                 "additionalProperties": false
@@ -376,7 +413,32 @@ async fn tool_snapshot(session: &Arc<Session>, args: &Value) -> std::result::Res
     let scope_str = args.get("scope").and_then(Value::as_str).unwrap_or("window");
     let scope = Scope::parse(scope_str).unwrap_or(Scope::Window);
 
-    let out = session.snapshot(scope).await.map_err(|e| e.to_string())?;
+    let filter = SnapshotFilter {
+        query: args
+            .get("filter")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        roles: args
+            .get("roles")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.trim().to_ascii_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        interactive_only: args.get("interactive_only").and_then(Value::as_bool).unwrap_or(false),
+        limit: args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .map(|n| n.max(1) as usize),
+    };
+
+    let out = session.snapshot_filtered(scope, &filter).await.map_err(|e| e.to_string())?;
     let mut text = out.yaml;
     if !out.opaque.is_empty() {
         text.push_str("\n# opaque apps (no/flat accessibility tree — vision fallback):\n");

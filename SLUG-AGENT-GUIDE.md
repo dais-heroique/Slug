@@ -60,10 +60,40 @@ Slug. Say so plainly instead of trying.
 
 ### `slug_snapshot`
 ```json
-{ "scope": "focused" | "window" | "desktop" }   // default: "window"
+{ "scope": "focused" | "window" | "desktop",      // default: "window"
+  "filter": "basket",                              // optional: substring on names
+  "roles": ["button", "entry"],                    // optional: keep only these roles
+  "interactive_only": true,                        // optional: drop static text/containers
+  "limit": 50 }                                    // optional: cap (default 50)
 ```
 - `focused` / `window` → the focused top-level window (small, fast — your default).
 - `desktop` → every running app (use only to locate an app or its window).
+
+**The fast path — filter server-side, don't pull the whole tree.** A real web
+page is tens of thousands of characters; reading it all is what makes you slow.
+When you're looking for *a specific control*, pass `filter` / `roles` /
+`interactive_only`. The snapshot then returns a **compact flat list of only the
+matching nodes**, each already carrying its `[ref=…]` **and** a centre `@x,y`:
+
+```
+- button "Add to Basket" [ref=b7] @812,540
+- entry "Search" [ref=i1] [focused] @640,80
+# … 3 more matched; raise 'limit' or refine 'filter'/'roles' …
+```
+
+That single line is everything you need to act — `slug_invoke b7 click`, or
+`slug_click 812,540` if invoke fails. This replaces the old "snapshot the whole
+tree, then grep it" loop: the grep now happens **inside** the server.
+
+Common filters:
+- a button by label → `{ "roles": ["button"], "filter": "send" }`
+- all text fields → `{ "roles": ["entry", "combo_box", "entry_search", "entry_multiline"] }`
+- just the actionable controls → `{ "interactive_only": true }`
+- read a move list / labels → `{ "roles": ["static_text"], "limit": 200 }`
+
+Omit all of them only when you genuinely need the *structure* (hierarchy) of the
+window. `roles` values are the lower-case role names exactly as printed in a
+snapshot (`button`, `entry`, `link`, `heading`, `static_text`, `combo_box`, …).
 
 ### `slug_invoke`
 ```json
@@ -194,16 +224,18 @@ before a `desktop` snapshot.
 These come from driving real apps and override the defaults above when they
 conflict:
 
-1. **A snapshot can be huge — never read the whole thing.** If you saved the
-   snapshot to a file (HTTP/curl workflow), `grep` it; don't cat it. Target by
-   role + keyword:
-   ```sh
-   grep -n "button"                      file | grep -i "send"  | head -40   # a button
-   grep -n "entry\|combo_box\|text_area" file                                # text fields
-   grep -n "heading\|link"               file | grep -i "inbox" | head -40   # titles/links
+1. **A snapshot can be huge — filter it server-side instead of reading it whole.**
+   Pass `filter` / `roles` / `interactive_only` to `slug_snapshot` and you get back
+   a tiny flat list of just the matching nodes (with `ref` + `@x,y`). This is the
+   single biggest speed win — the grep now runs inside the server, so you never pay
+   to transfer or read 80k characters:
+   ```json
+   { "scope": "focused", "roles": ["button"], "filter": "send" }     // a button
+   { "scope": "focused", "roles": ["entry", "combo_box", "entry_search"] }  // fields
+   { "scope": "focused", "roles": ["heading", "link"], "filter": "inbox" }  // titles/links
    ```
-   When the snapshot comes back as an MCP tool result (stdio), read only the
-   lines you need — find the role+name, grab its `ref`, ignore the rest.
+   (Only fall back to client-side `grep` on a saved file if you're in the raw
+   curl/HTTP workflow and already dumped the full tree.)
 
 2. **Don't trust `slug_wait_for` to land** — it times out more often than not on
    real apps. After an action, **just call `slug_snapshot {scope:"focused"}`
@@ -215,8 +247,8 @@ conflict:
    `https://mail.google.com/mail/?view=cm&fs=1`, Amazon onto an already-encoded
    search URL, or a file / deep-link for a native app.
 
-4. **Find refs by role + keyword**, exactly as in rule 1 — never eyeball the
-   whole tree.
+4. **Find refs with the snapshot filter, not by eyeballing the tree** — see rule 1.
+   `{ roles: [...], filter: "..." }` returns exactly the candidate nodes.
 
 5. **Fill forms in a fixed order:** `slug_invoke set_text` on **every** field
    first, *then* `click` the submit/save button last. Don't submit between fields.
@@ -238,33 +270,47 @@ conflict:
    - columns: a=352 b=452 c=552 d=652 e=752 f=852 g=952 h=1052
    - rows:    1=950  2=850  3=750  4=650  5=550  6=450  7=350  8=250
    - move e2→e4: `slug_click {x:752, y:850}` then `slug_click {x:752, y:650}`
-   - read played moves: `grep "static_text.*[0-9]\."` in the snapshot.
+   - read played moves with a **filtered** snapshot, not the whole page:
+     `slug_snapshot { roles: ["static_text"], limit: 200 }`.
 
 10. **If `slug_invoke` fails with error AX -25202** (action not supported), fall back to
     `slug_click` with the `@X,Y` coordinates printed in the snapshot for that node.
+    (A filtered snapshot already prints `@x,y` on every line — use it directly.)
 
-11. **Verify an action worked** by grepping the next snapshot for the expected result:
-    - Amazon add-to-cart: `grep "items in shopping basket"` → check the counter.
-    - Chess move played: `grep "static_text.*[0-9]\."` → read the move notation.
-    - Form saved: look for a confirmation message or state change in `static_text`.
+11. **Verify an action worked** with a *filtered* snapshot of the expected result —
+    don't re-read the whole page:
+    - Amazon add-to-cart: `slug_snapshot { filter: "items in basket" }` → read the counter.
+    - Chess move played: `slug_snapshot { roles: ["static_text"], limit: 200 }` → read notation.
+    - Form saved: `slug_snapshot { filter: "saved" }` or check the field's new state.
 
 ### App-specific fast paths
+
+**Chess blitz (chess.com) — minimise per-move latency**
+```
+Per move (≈2 calls, no full snapshot):
+1. slug_click {x: <from_x>, y: <from_y>}     # pick up your piece
+2. slug_click {x: <to_x>,   y: <to_y>}       # drop it (coords from the grid in rule 9)
+3. Only when you must read the engine's reply:
+   slug_snapshot { roles: ["static_text"], limit: 200 }   # tiny — just the move list
+Never snapshot the full board between your own moves; the board is a canvas with
+no nodes anyway, so a full snapshot tells you nothing a filtered one doesn't.
+```
 
 **Amazon**
 ```
 1. slug_launch Safari uri=https://www.amazon.fr/s?k=PRODUIT+ENCODE
-2. grep "button.*Add to basket\|ref=b" snapshot | head -30
-3. Match each "Add to basket" button to the product lines just above it; pick only those with X ≥ 0
+2. slug_snapshot { roles: ["button"], filter: "basket" }   # flat list, each with ref + @x,y
+3. Pick the button on the row you want (ignore any with X < 0 — off-screen)
 4. slug_invoke ref=bXXX action=click  (repeat for each item)
 ```
 
 **Gmail — compose and send/draft**
 ```
-1. slug_launch Safari uri=https://mail.google.com
-2. grep "button.*Compose" snapshot → slug_invoke click
-3. slug_snapshot scope=focused → grep "entry\|text_area\|combo_box"
-4. slug_invoke set_text on To, Subject, Body  (in that order)
-5. slug_invoke click on Send  OR  grep "Save & close\|image.*Save" → click to draft
+1. slug_launch Safari uri=https://mail.google.com/mail/?view=cm&fs=1   # opens compose directly
+2. slug_snapshot { roles: ["entry", "combo_box", "entry_multiline"] }  # To / Subject / Body fields
+3. slug_invoke set_text on To, Subject, Body  (in that order)
+4. slug_snapshot { roles: ["button"], filter: "send" } → slug_invoke click
+   (or { filter: "save" } / Esc to leave a draft)
 ```
 
 ---

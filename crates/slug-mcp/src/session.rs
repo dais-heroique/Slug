@@ -34,6 +34,37 @@ impl Scope {
     }
 }
 
+/// A server-side filter for [`Session::snapshot_filtered`]. When *active*, the
+/// snapshot is rendered as a compact **flat list** of only the matching nodes
+/// (each with its `ref` and centre `@x,y`) instead of the full indented tree —
+/// this is the fast path that avoids shipping an 80k-char document just to find
+/// one button. See [`slug_core::yaml::render_filtered`].
+#[derive(Clone, Debug, Default)]
+pub struct SnapshotFilter {
+    /// Case-insensitive substring matched against each node's display label.
+    pub query: Option<String>,
+    /// Keep only these lower-case role names (e.g. `["button", "entry"]`).
+    pub roles: Vec<String>,
+    /// Keep only directly actionable controls (buttons, fields, links, …).
+    pub interactive_only: bool,
+    /// Cap on emitted nodes (defaults to [`SnapshotFilter::DEFAULT_LIMIT`]).
+    pub limit: Option<usize>,
+}
+
+impl SnapshotFilter {
+    /// Default cap on nodes returned in filtered mode.
+    pub const DEFAULT_LIMIT: usize = 50;
+
+    /// Whether any constraint is set. When `false`, callers render the full tree.
+    pub fn is_active(&self) -> bool {
+        self.query.is_some() || !self.roles.is_empty() || self.interactive_only
+    }
+
+    fn limit(&self) -> usize {
+        self.limit.unwrap_or(Self::DEFAULT_LIMIT)
+    }
+}
+
 /// Errors surfaced to the MCP tool layer (returned in the tool result object,
 /// never as protocol errors).
 #[derive(Debug, thiserror::Error)]
@@ -58,11 +89,13 @@ struct DocState {
 /// cache anyway), long enough to dedupe the dashboard's rapid polling.
 const SNAPSHOT_TTL: Duration = Duration::from_millis(250);
 
-/// A cached snapshot for one scope.
+/// A cached snapshot for one scope. We cache the **scoped sub-document** (not the
+/// rendered string) so that, within the TTL, both a full-tree render and any
+/// number of filtered "find" renders are served from one harvest.
 struct CachedSnapshot {
     scope: Scope,
     at: Instant,
-    yaml: String,
+    doc: SlugDocument,
     opaque: Vec<Coverage>,
 }
 
@@ -139,17 +172,34 @@ impl Session {
         });
     }
 
-    /// Produce a YAML snapshot for the given scope. Re-harvests, refreshes the
-    /// alias table, and renders Playwright-MCP-style YAML (aliases only).
+    /// Produce a full-tree YAML snapshot for the given scope.
     pub async fn snapshot(self: &Arc<Self>, scope: Scope) -> Result<SnapshotOutput> {
-        // Serve from the short-lived cache if a same-scope snapshot is still fresh.
-        {
+        self.snapshot_filtered(scope, &SnapshotFilter::default()).await
+    }
+
+    /// Produce a snapshot for `scope`, optionally narrowed by `filter`.
+    ///
+    /// When `filter.is_active()`, the result is a compact **flat list** of only
+    /// the matching nodes (each with its `ref` and centre `@x,y`) — the fast path
+    /// that avoids shipping the whole tree. Otherwise the full indented tree is
+    /// rendered. Both share the same harvest via the short-lived scope cache.
+    pub async fn snapshot_filtered(
+        self: &Arc<Self>,
+        scope: Scope,
+        filter: &SnapshotFilter,
+    ) -> Result<SnapshotOutput> {
+        // Serve from the short-lived cache if a same-scope harvest is still fresh.
+        let cached = {
             let cache = self.cache.lock().await;
-            if let Some(c) = cache.as_ref() {
-                if c.scope == scope && c.at.elapsed() < SNAPSHOT_TTL {
-                    return Ok(SnapshotOutput { yaml: c.yaml.clone(), opaque: c.opaque.clone() });
-                }
-            }
+            cache
+                .as_ref()
+                .filter(|c| c.scope == scope && c.at.elapsed() < SNAPSHOT_TTL)
+                .map(|c| (c.doc.clone(), c.opaque.clone()))
+        };
+        if let Some((doc, opaque)) = cached {
+            let state = self.state.lock().await;
+            let yaml = render(&doc, &state.aliases, filter);
+            return Ok(SnapshotOutput { yaml, opaque });
         }
 
         let bridge = self.ensure_bridge().await?;
@@ -172,10 +222,10 @@ impl Session {
         for node in scoped.bfs_order() {
             state.aliases.assign(&node.slug_ref, node.role);
         }
-        let yaml = scoped.to_yaml(&state.aliases);
+        let yaml = render(&scoped, &state.aliases, filter);
         drop(state);
         *self.cache.lock().await =
-            Some(CachedSnapshot { scope, at: Instant::now(), yaml: yaml.clone(), opaque: opaque.clone() });
+            Some(CachedSnapshot { scope, at: Instant::now(), doc: scoped, opaque: opaque.clone() });
         Ok(SnapshotOutput { yaml, opaque })
     }
 
@@ -348,6 +398,23 @@ async fn apply_event(state: &Arc<Mutex<DocState>>, event: &SlugEvent) {
     }
 }
 
+/// Render a scoped document either as the full indented tree or, when the filter
+/// is active, as a compact flat list of only the matching nodes.
+fn render(doc: &SlugDocument, aliases: &AliasTable, filter: &SnapshotFilter) -> String {
+    if filter.is_active() {
+        slug_core::yaml::render_filtered(
+            doc,
+            aliases,
+            filter.query.as_deref(),
+            &filter.roles,
+            filter.interactive_only,
+            filter.limit(),
+        )
+    } else {
+        doc.to_yaml(aliases)
+    }
+}
+
 /// Select the sub-document to render for a scope.
 ///
 /// * `Desktop` → the whole document.
@@ -399,6 +466,52 @@ mod tests {
         assert_eq!(Scope::parse("Desktop"), Some(Scope::Desktop));
         assert_eq!(Scope::parse("focused"), Some(Scope::Focused));
         assert_eq!(Scope::parse("nope"), None);
+    }
+
+    #[test]
+    fn snapshot_filter_activity_and_limit() {
+        let none = SnapshotFilter::default();
+        assert!(!none.is_active());
+        assert_eq!(none.limit(), SnapshotFilter::DEFAULT_LIMIT);
+
+        let by_role = SnapshotFilter { roles: vec!["button".into()], ..Default::default() };
+        assert!(by_role.is_active());
+
+        let by_query = SnapshotFilter { query: Some("save".into()), ..Default::default() };
+        assert!(by_query.is_active());
+
+        let interactive = SnapshotFilter { interactive_only: true, ..Default::default() };
+        assert!(interactive.is_active());
+
+        let capped = SnapshotFilter { limit: Some(5), ..Default::default() };
+        assert_eq!(capped.limit(), 5);
+    }
+
+    #[test]
+    fn render_dispatches_full_vs_filtered() {
+        let mut win = SlugNode::new("W", SlugRole::Window);
+        win.name = Some("Editor".into());
+        win.child_refs = vec!["B".into()];
+        let mut b = SlugNode::new("B", SlugRole::Button);
+        b.parent_ref = Some("W".into());
+        b.name = Some("Save".into());
+        b.states = vec![SlugState::Enabled];
+        let doc = SlugDocument::from_nodes([win, b]);
+        let mut aliases = AliasTable::new();
+        for n in doc.bfs_order() {
+            aliases.assign(&n.slug_ref, n.role);
+        }
+
+        // No filter → full indented tree (window present, nested).
+        let full = render(&doc, &aliases, &SnapshotFilter::default());
+        assert!(full.contains("- window \"Editor\""));
+        assert!(full.contains("  - button \"Save\""));
+
+        // Filter on buttons → flat list, no window line, no indentation.
+        let filtered =
+            render(&doc, &aliases, &SnapshotFilter { roles: vec!["button".into()], ..Default::default() });
+        assert!(filtered.contains("- button \"Save\""));
+        assert!(!filtered.contains("window"), "filtered output should be flat: {filtered}");
     }
 
     #[test]
