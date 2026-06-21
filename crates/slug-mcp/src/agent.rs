@@ -50,6 +50,7 @@ impl AgentState {
 pub struct AgentController {
     state: Arc<Mutex<AgentState>>,
     agent_bin: String,
+    approvals: Arc<crate::approval::ApprovalRegistry>,
 }
 
 impl AgentController {
@@ -61,7 +62,14 @@ impl AgentController {
         Arc::new(AgentController {
             state: Arc::new(Mutex::new(AgentState { status: "idle".into(), ..Default::default() })),
             agent_bin,
+            approvals: Arc::new(crate::approval::ApprovalRegistry::new()),
         })
+    }
+
+    /// The shared registry of pending destructive-action approvals (the
+    /// dashboard lists/decides them; the tool gate waits on them).
+    pub fn approvals(&self) -> Arc<crate::approval::ApprovalRegistry> {
+        self.approvals.clone()
     }
 
     /// Start a new task. Errors if one is already running.

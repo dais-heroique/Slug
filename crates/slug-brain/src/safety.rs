@@ -43,29 +43,10 @@ impl Budget {
     }
 }
 
-/// Keywords that make an action destructive / hard to reverse.
-const DESTRUCTIVE_KEYWORDS: &[&str] = &[
-    "delete", "remove", "trash", "discard", "erase", "destroy", "wipe", "format",
-    "send", "submit", "post", "publish", "share",
-    "purchase", "buy", "pay", "checkout", "order", "subscribe",
-    "uninstall", "deactivate", "disable", "shut down", "shutdown", "log out", "logout",
-    "confirm", "overwrite", "replace all",
-];
-
-/// Whether an action on a node is destructive, based on the action verb and the
-/// node's label/args text. Pattern-matched per the task brief.
-pub fn is_destructive(action: &str, target_label: Option<&str>, args: Option<&str>) -> bool {
-    let mut hay = action.to_ascii_lowercase();
-    if let Some(l) = target_label {
-        hay.push(' ');
-        hay.push_str(&l.to_ascii_lowercase());
-    }
-    if let Some(a) = args {
-        hay.push(' ');
-        hay.push_str(&a.to_ascii_lowercase());
-    }
-    DESTRUCTIVE_KEYWORDS.iter().any(|k| hay.contains(k))
-}
+// Destructive-action detection now lives in `slug-core` so the MCP server can
+// enforce the same policy for external clients. Re-exported here so the agent's
+// existing call sites (and tests) keep working unchanged.
+pub use slug_core::is_destructive;
 
 /// A confirmation gate for destructive actions.
 pub trait ConfirmHook: Send + Sync {

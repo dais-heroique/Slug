@@ -9,6 +9,7 @@
 //! ever sees short ref aliases (`b1`, `e5`) — ULIDs never cross this boundary.
 
 pub mod agent;
+pub mod approval;
 pub mod mcp;
 pub mod server;
 pub mod session;

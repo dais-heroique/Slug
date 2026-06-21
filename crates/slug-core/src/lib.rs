@@ -29,6 +29,7 @@ pub mod document;
 pub mod node;
 pub mod refs;
 pub mod role;
+pub mod safety;
 pub mod state;
 pub mod yaml;
 
@@ -39,4 +40,5 @@ pub use document::{Snapshot, SlugDocument};
 pub use node::{Bounds, SlugAction, SlugNode, SlugOption, Validation, ValidationState};
 pub use refs::{derive_ref, derive_ref_from_atspi};
 pub use role::SlugRole;
+pub use safety::is_destructive;
 pub use state::SlugState;

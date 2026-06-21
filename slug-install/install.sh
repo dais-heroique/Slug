@@ -126,6 +126,8 @@ cat > "$PLIST" <<EOF
     <key>SLUG_AGENT_BIN</key><string>$BIN_DIR/slug-agent</string>
     <key>SLUG_CONFIG</key><string>$CONFIG</string>
     <key>RUST_LOG</key><string>slug_mcp=info,slug_brain=info,slug_bridge=info</string>
+    <!-- Destructive actions from external clients: ask (approve in the dashboard) | deny | allow -->
+    <key>SLUG_DESTRUCTIVE</key><string>ask</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

@@ -355,6 +355,42 @@ async fn handle_tool_call(
     let name = params.get("name").and_then(Value::as_str).ok_or((-32602, "missing tool name".into()))?;
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
 
+    // Security gate: destructive actions from an external client (i.e. when a
+    // controller is attached — the daemon path) are enforced here, since such
+    // clients never go through the agent's own confirmation hook. The in-process
+    // agent path passes `control == None` and keeps using its own gate.
+    if let Some(ctrl) = control {
+        if let Some(summary) = crate::approval::destructive_summary(name, &args) {
+            use crate::approval::{Decision, PolicyMode, DEFAULT_APPROVAL_TIMEOUT};
+            match PolicyMode::from_env() {
+                PolicyMode::Allow => {}
+                PolicyMode::Deny => {
+                    return Ok(tool_text(
+                        format!("denied: destructive action blocked by policy (SLUG_DESTRUCTIVE=deny): {summary}"),
+                        true,
+                    ));
+                }
+                PolicyMode::Ask => {
+                    match ctrl.approvals().request(name, &summary, DEFAULT_APPROVAL_TIMEOUT).await {
+                        Decision::Approved => {}
+                        Decision::Denied => {
+                            return Ok(tool_text(
+                                format!("denied: a human declined this action in the dashboard: {summary}"),
+                                true,
+                            ));
+                        }
+                        Decision::TimedOut => {
+                            return Ok(tool_text(
+                                format!("denied: no human approval within timeout — open the Slug dashboard to approve destructive actions: {summary}"),
+                                true,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let result = match name {
         "slug_snapshot" => tool_snapshot(session, &args).await,
         "slug_invoke" => tool_invoke(session, &args).await,

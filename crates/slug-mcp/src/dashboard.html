@@ -54,6 +54,14 @@
 
   .toolbar { display:flex; align-items:center; gap:8px; margin-left:auto; font-size:11px; }
   select,input.f { background:var(--panel2); color:var(--fg); border:1px solid var(--line); border-radius:5px; font:inherit; padding:2px 6px; }
+  .approvals { background:#3d1d1d; border-bottom:1px solid #f85149; padding:8px 16px; display:flex; flex-direction:column; gap:6px; flex:0 0 auto; }
+  .approvals .hdr { color:#ff7b72; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  .approvals .ap { display:flex; align-items:center; gap:10px; font-size:13px; }
+  .approvals .ap .txt { flex:1; color:#ffd7d5; word-break:break-word; }
+  .approvals .ap .age { color:var(--muted); font-size:11px; }
+  .approvals button { font:inherit; border:1px solid var(--line); border-radius:5px; padding:3px 12px; cursor:pointer; }
+  .approvals .ok { background:#1f6f3f; color:#fff; border-color:#2ea043; }
+  .approvals .no { background:#6f1f1f; color:#fff; border-color:#f85149; }
   input.f { width:120px; }
   .tree { white-space:pre; }
   .role { font-weight:700; }
@@ -91,6 +99,8 @@
   </div>
   <div class="banner">Slug never captures pixels. Everything below is the same structured text the agent reads.</div>
 </header>
+
+<div id="approvals" class="approvals" hidden></div>
 
 <main>
   <!-- LEFT: agent -->
@@ -169,10 +179,38 @@ function tickInterval(){ return lastStatus==='running' ? 800 : 3000; }
 
 async function loop() {
   await refreshStatus();
+  if (!document.hidden) refreshApprovals();
   if (!document.hidden && Date.now()-treeAt > TREE_INTERVAL) refreshTree(false);
   if (!document.hidden && Date.now()-appsAt > 5000) refreshApps();
   if (treeAt) document.getElementById('treeAge').textContent = '· '+rel(treeAt,Date.now())+' ago';
   setTimeout(loop, tickInterval());
+}
+
+// --- Destructive-action approvals (human-in-the-loop) ---
+let approvalsInFlight=false;
+async function refreshApprovals(){
+  if (approvalsInFlight) return; approvalsInFlight=true;
+  try {
+    const res = await fetch('/approvals');
+    if (!res.ok) return;
+    const { pending=[] } = await res.json();
+    const box = document.getElementById('approvals');
+    if (!pending.length) { box.hidden = true; box.innerHTML=''; return; }
+    box.hidden = false;
+    let html = '<div class="hdr">⚠ '+pending.length+' destructive action'+(pending.length>1?'s':'')+' awaiting approval</div>';
+    for (const a of pending) {
+      html += '<div class="ap"><span class="txt">'+esc(a.summary||a.tool)+'</span>'
+            + '<span class="age">'+ (a.age_s||0) +'s</span>'
+            + '<button class="ok" onclick="decide('+a.id+',true)">Approve</button>'
+            + '<button class="no" onclick="decide('+a.id+',false)">Deny</button></div>';
+    }
+    box.innerHTML = html;
+  } catch(e) {} finally { approvalsInFlight=false; }
+}
+async function decide(id, approved){
+  try { await fetch('/approve', { method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ id, approved }) }); } catch(e) {}
+  refreshApprovals();
 }
 
 async function refreshStatus() {

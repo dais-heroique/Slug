@@ -318,9 +318,14 @@ no nodes anyway, so a full snapshot tells you nothing a filtered one doesn't.
 ## 5. Safety you must respect
 
 - **Destructive actions** (`delete`, `send`, `purchase`, `submit`, `discard`, …)
-  are gated. In interactive mode a human is asked `y/N`; with `--non-interactive`
-  they are **auto-denied**. If a destructive action is denied, **stop and report**
-  — don't try to route around the gate.
+  are gated **at the Slug server**, for every client — including you when you
+  drive Slug directly over MCP. By default (`SLUG_DESTRUCTIVE=ask`) a destructive
+  `slug_invoke` **blocks until a human approves it in the dashboard**; your tool
+  call simply waits, then returns success if approved or an `isError` "denied…" if
+  refused or timed out (~120 s). With `SLUG_DESTRUCTIVE=deny` they're refused
+  outright; with `allow`, permitted. If a destructive action is denied, **stop and
+  report** — don't try to route around the gate (e.g. don't replay it as a raw
+  `slug_click`/`slug_key`).
 - **Per-session caps** (tokens, USD cost, max steps) can halt the loop and escalate
   to a human. If you're escalated, summarize what you did and what's left.
 - Every action is logged with its `reasoning`. Write reasoning that would make

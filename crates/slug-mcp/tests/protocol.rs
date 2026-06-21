@@ -6,8 +6,8 @@
 //! is exactly the contract we assert here.
 
 use serde_json::{json, Value};
-use slug_mcp::mcp::{handle, JsonRpcRequest};
-use slug_mcp::Session;
+use slug_mcp::mcp::{handle, handle_with_control, JsonRpcRequest};
+use slug_mcp::{AgentController, Session};
 
 fn req(id: i64, method: &str, params: Value) -> JsonRpcRequest {
     serde_json::from_value(json!({
@@ -184,6 +184,55 @@ async fn key_without_keys_is_an_iserror_result() {
     let v = serde_json::to_value(&resp).unwrap();
     assert!(v["error"].is_null(), "must not be a protocol error");
     assert_eq!(v["result"]["isError"], true);
+}
+
+#[tokio::test]
+async fn destructive_invoke_is_gated_for_external_clients() {
+    // With a controller attached (the daemon path), destructive actions are
+    // enforced server-side. Set deny mode so the test is deterministic and never
+    // blocks waiting for a human.
+    std::env::set_var("SLUG_DESTRUCTIVE", "deny");
+    let session = Session::new();
+    let control = AgentController::new();
+
+    // A destructive invoke is blocked by policy BEFORE it ever touches the bus.
+    let resp = handle_with_control(
+        &session,
+        Some(control.clone()),
+        req(
+            20,
+            "tools/call",
+            json!({ "name": "slug_invoke",
+                "arguments": { "ref": "b1", "action": "click", "reasoning": "delete the account" } }),
+        ),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null());
+    assert_eq!(v["result"]["isError"], true);
+    let t = v["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(t.contains("denied"), "destructive action should be denied; got: {t}");
+
+    // A benign invoke is NOT gated: it passes the gate and fails only at the bus.
+    let resp = handle_with_control(
+        &session,
+        Some(control),
+        req(
+            21,
+            "tools/call",
+            json!({ "name": "slug_invoke",
+                "arguments": { "ref": "b1", "action": "focus", "reasoning": "focus the field" } }),
+        ),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert_eq!(v["result"]["isError"], true);
+    let t = v["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(t.contains("not connected"), "benign action should reach the bus; got: {t}");
+
+    std::env::remove_var("SLUG_DESTRUCTIVE");
 }
 
 #[tokio::test]

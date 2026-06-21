@@ -127,6 +127,41 @@ pub async fn run_http(
         ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], Html(DASHBOARD_HTML))
     }
 
+    /// List destructive actions awaiting human approval (polled by the dashboard).
+    async fn list_approvals(
+        State(state): State<AppState>,
+        headers: axum::http::HeaderMap,
+    ) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        Json(state.control.approvals().list().await).into_response()
+    }
+
+    /// Approve or deny a pending destructive action. Body: `{ "id": N, "approved": bool }`.
+    async fn decide_approval(
+        State(state): State<AppState>,
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let id = body.get("id").and_then(|v| v.as_u64());
+        let approved = body.get("approved").and_then(|v| v.as_bool());
+        match (id, approved) {
+            (Some(id), Some(approved)) => match state.control.approvals().decide(id, approved).await {
+                Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+                Err(e) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": e }))).into_response(),
+            },
+            _ => (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "expected { id: number, approved: boolean }" })),
+            )
+                .into_response(),
+        }
+    }
+
     /// Accept a request only if it is local: any present `Origin` and `Host`
     /// header must point at loopback. This blocks cross-site / DNS-rebinding
     /// attacks while leaving local CLI clients (no Origin) untouched.
@@ -163,6 +198,8 @@ pub async fn run_http(
     let app = Router::new()
         .route("/mcp", post(mcp_endpoint))
         .route("/dashboard", get(dashboard))
+        .route("/approvals", get(list_approvals))
+        .route("/approve", post(decide_approval))
         .route("/healthz", get(|| async { "ok" }))
         .with_state(AppState { session, control });
 

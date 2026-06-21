@@ -252,14 +252,20 @@ cores, maps VRAM → tier. With `selection = "auto"`: cloud → Claude, local �
 | `TIER_LOCAL_STD` | 12–23 GB | Ollama | `qwen3:14b` (Q4_K_M) |
 | `TIER_LOCAL_LARGE` | ≥ 24 GB | Ollama | `qwen3:32b` (Q4_K_M) |
 
-### Safety (in `slug-brain/src/safety.rs`)
-- **Per-session caps** — token + (cloud) USD cost caps; when hit, the loop stops
-  and escalates to a human (exit code 1).
-- **Destructive-action confirmation** — `delete`/`send`/`purchase`/`submit`/… are
-  pattern-matched against action, argument, and the model's stated reasoning, and
-  gated behind a `y/N` hook (auto-deny with `--non-interactive`).
-- **Structured action log** — every action logged with reasoning + result;
-  best-effort **undo** of the last action.
+### Safety
+Destructive-action detection lives in `slug-core` (`is_destructive`, shared so
+there's no crate cycle); the keyword list covers delete/send/buy/submit/…
+- **Agent loop (`slug-brain/src/safety.rs`)** — per-session caps (token + cloud
+  USD cost; when hit the loop stops and escalates, exit code 1); destructive
+  actions gated behind a `y/N` `ConfirmHook` (auto-deny with `--non-interactive`);
+  a structured action log with best-effort **undo** of the last action.
+- **MCP server (`slug-mcp/src/approval.rs`)** — enforced for **external** clients
+  (which never hit the agent's hook). When a controller is attached, a destructive
+  `slug_invoke` is gated by `SLUG_DESTRUCTIVE`: `ask` (default) blocks until a
+  human approves/denies in the **dashboard** (`GET /approvals`, `POST /approve`;
+  120 s timeout → denied), `deny` refuses outright, `allow` permits. The launchd
+  plist sets `ask`. This closes the hole where any MCP client driving Slug
+  directly could run irreversible actions unsupervised.
 
 ---
 
