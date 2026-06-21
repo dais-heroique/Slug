@@ -6,8 +6,8 @@
 //! is exactly the contract we assert here.
 
 use serde_json::{json, Value};
-use slug_mcp::mcp::{handle, JsonRpcRequest};
-use slug_mcp::Session;
+use slug_mcp::mcp::{handle, handle_with_control, JsonRpcRequest};
+use slug_mcp::{AgentController, Session};
 
 fn req(id: i64, method: &str, params: Value) -> JsonRpcRequest {
     serde_json::from_value(json!({
@@ -27,20 +27,83 @@ async fn initialize_advertises_tools_capability() {
 }
 
 #[tokio::test]
-async fn tools_list_exposes_the_four_tools() {
+async fn tools_list_exposes_the_perception_and_agent_tools() {
     let session = Session::new();
     let resp = handle(&session, req(2, "tools/list", json!({}))).await.expect("response");
     let v = serde_json::to_value(&resp).unwrap();
     let tools = v["result"]["tools"].as_array().expect("tools array");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names.len(), 4);
-    for expected in ["slug_snapshot", "slug_invoke", "slug_wait_for", "slug_list_apps"] {
+    // The four perception/action tools …
+    for expected in [
+        "slug_snapshot", "slug_invoke", "slug_launch", "slug_click", "slug_scroll",
+        "slug_key", "slug_wait_for", "slug_list_apps",
+    ] {
         assert!(names.contains(&expected), "missing tool {expected}");
+    }
+    // … plus the M2.5 agent-control tools.
+    for expected in [
+        "slug_agent_start_task",
+        "slug_agent_status",
+        "slug_agent_pause",
+        "slug_agent_resume",
+        "slug_agent_stop",
+    ] {
+        assert!(names.contains(&expected), "missing agent tool {expected}");
     }
     // Every tool must publish a JSON-Schema object input schema.
     for t in tools {
         assert_eq!(t["inputSchema"]["type"], "object", "tool {} schema", t["name"]);
     }
+}
+
+#[tokio::test]
+async fn snapshot_tool_clarifies_it_is_not_a_screenshot() {
+    let session = Session::new();
+    let resp = handle(&session, req(3, "tools/list", json!({}))).await.expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    let tools = v["result"]["tools"].as_array().unwrap();
+    let snap = tools.iter().find(|t| t["name"] == "slug_snapshot").unwrap();
+    let desc = snap["description"].as_str().unwrap();
+    assert!(desc.contains("NOT a screenshot"), "snapshot must disclaim screenshots");
+}
+
+#[tokio::test]
+async fn snapshot_tool_advertises_server_side_filter() {
+    let session = Session::new();
+    let resp = handle(&session, req(9, "tools/list", json!({}))).await.expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    let tools = v["result"]["tools"].as_array().unwrap();
+    let snap = tools.iter().find(|t| t["name"] == "slug_snapshot").unwrap();
+    let props = &snap["inputSchema"]["properties"];
+    // The fast-path filter params must be discoverable by the model.
+    assert!(props["filter"].is_object(), "filter param missing");
+    assert!(props["roles"].is_object(), "roles param missing");
+    assert!(props["interactive_only"].is_object(), "interactive_only param missing");
+    assert!(props["limit"].is_object(), "limit param missing");
+    assert_eq!(props["roles"]["type"], "array");
+}
+
+#[tokio::test]
+async fn filtered_snapshot_without_bus_is_an_iserror_result() {
+    // A filtered snapshot still needs the bus; it must fail as an isError tool
+    // result (not a protocol error), exactly like an unfiltered one.
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(
+            10,
+            "tools/call",
+            json!({
+                "name": "slug_snapshot",
+                "arguments": { "scope": "focused", "filter": "basket", "roles": ["button"] }
+            }),
+        ),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
 }
 
 #[tokio::test]
@@ -77,6 +140,99 @@ async fn tool_call_without_bus_is_an_iserror_result_not_protocol_error() {
     // ...but the tool result flags the failure.
     assert_eq!(v["result"]["isError"], true);
     assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("not connected"));
+}
+
+#[tokio::test]
+async fn launch_without_name_or_uri_is_an_iserror_result() {
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(6, "tools/call", json!({ "name": "slug_launch", "arguments": {} })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+    assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("provide"));
+}
+
+#[tokio::test]
+async fn click_without_coords_is_an_iserror_result() {
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(7, "tools/call", json!({ "name": "slug_click", "arguments": { "x": 10 } })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+    assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("'y'"));
+}
+
+#[tokio::test]
+async fn key_without_keys_is_an_iserror_result() {
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(8, "tools/call", json!({ "name": "slug_key", "arguments": {} })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+}
+
+#[tokio::test]
+async fn destructive_invoke_is_gated_for_external_clients() {
+    // With a controller attached (the daemon path), destructive actions are
+    // enforced server-side. Set deny mode so the test is deterministic and never
+    // blocks waiting for a human.
+    std::env::set_var("SLUG_DESTRUCTIVE", "deny");
+    let session = Session::new();
+    let control = AgentController::new();
+
+    // A destructive invoke is blocked by policy BEFORE it ever touches the bus.
+    let resp = handle_with_control(
+        &session,
+        Some(control.clone()),
+        req(
+            20,
+            "tools/call",
+            json!({ "name": "slug_invoke",
+                "arguments": { "ref": "b1", "action": "click", "reasoning": "delete the account" } }),
+        ),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null());
+    assert_eq!(v["result"]["isError"], true);
+    let t = v["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(t.contains("denied"), "destructive action should be denied; got: {t}");
+
+    // A benign invoke is NOT gated: it passes the gate and fails only at the bus.
+    let resp = handle_with_control(
+        &session,
+        Some(control),
+        req(
+            21,
+            "tools/call",
+            json!({ "name": "slug_invoke",
+                "arguments": { "ref": "b1", "action": "focus", "reasoning": "focus the field" } }),
+        ),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert_eq!(v["result"]["isError"], true);
+    let t = v["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(t.contains("not connected"), "benign action should reach the bus; got: {t}");
+
+    std::env::remove_var("SLUG_DESTRUCTIVE");
 }
 
 #[tokio::test]

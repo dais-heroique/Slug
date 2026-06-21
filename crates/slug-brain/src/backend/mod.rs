@@ -10,7 +10,9 @@
 //! a `Box<dyn LlmBackend>`), avoiding an `async-trait` dependency.
 
 pub mod claude;
+pub mod gemini;
 pub mod ollama;
+pub mod openai;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -19,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use claude::ClaudeBackend;
+pub use gemini::GeminiBackend;
 pub use ollama::OllamaBackend;
+pub use openai::OpenAiCompatibleBackend;
 
 /// A tool definition presented to the model. `input_schema` is JSON Schema and is
 /// shared verbatim by both backends (each wraps it in its own envelope).

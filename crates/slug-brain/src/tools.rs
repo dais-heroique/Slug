@@ -17,12 +17,20 @@ use crate::backend::ToolSpec;
 /// snapshots are a known failure mode for UI agents — we cap context here.
 const MAX_SNAPSHOT_CHARS: usize = 12_000;
 
-/// Build the [`ToolSpec`]s from the MCP server's published tool definitions.
+/// Build the [`ToolSpec`]s the agent's model may call: the perception/action
+/// tools only. The `slug_agent_*` control tools are for an *external* supervisor
+/// driving this agent — exposing them to the agent itself would be illogical (it
+/// would try to start/stop itself) and they aren't available on the in-process
+/// transport anyway, so we filter them out. Fewer, relevant tools = fewer wasted
+/// calls = faster.
 pub fn tool_specs() -> Vec<ToolSpec> {
     mcp::tool_definitions()
         .into_iter()
         .filter_map(|def| {
             let name = def.get("name")?.as_str()?.to_string();
+            if name.starts_with("slug_agent_") {
+                return None;
+            }
             let description = def.get("description").and_then(Value::as_str).unwrap_or("").to_string();
             let input_schema = def.get("inputSchema").cloned().unwrap_or_else(|| json!({"type":"object"}));
             Some(ToolSpec { name, description, input_schema })
@@ -97,13 +105,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn specs_mirror_mcp_tools() {
+    fn specs_expose_perception_and_action_tools_only() {
         let specs = tool_specs();
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"slug_snapshot"));
-        assert!(names.contains(&"slug_invoke"));
-        assert!(names.contains(&"slug_wait_for"));
-        assert!(names.contains(&"slug_list_apps"));
+        // The agent's model sees every perception/action tool …
+        for t in [
+            "slug_snapshot", "slug_invoke", "slug_launch", "slug_click", "slug_scroll",
+            "slug_key", "slug_wait_for", "slug_list_apps",
+        ] {
+            assert!(names.contains(&t), "agent should see {t}");
+        }
+        // … but NOT the external agent-control tools (it would call itself).
+        for t in names.iter() {
+            assert!(!t.starts_with("slug_agent_"), "agent must not see control tool {t}");
+        }
         for s in &specs {
             assert_eq!(s.input_schema["type"], "object");
         }

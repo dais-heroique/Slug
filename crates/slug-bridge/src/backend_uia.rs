@@ -26,6 +26,7 @@ use windows::Win32::System::Ole::{
     SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound,
 };
 use windows::Win32::UI::Accessibility::*;
+use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 use crate::action::Action;
 use crate::backend::{
@@ -132,6 +133,25 @@ impl AccessibilityBackend for UiaBackend {
         })
     }
 
+    fn focused_app(&self) -> BoxFuture<'_, Result<Option<AppHandle>>> {
+        Box::pin(async move {
+            unsafe {
+                let hwnd = GetForegroundWindow();
+                if hwnd.0.is_null() {
+                    return Ok(None);
+                }
+                let el = match self.automation.ElementFromHandle(hwnd) {
+                    Ok(el) => el,
+                    Err(_) => return Ok(None),
+                };
+                let id = native_id(&el);
+                self.app_handles.lock().expect("mutex").insert(id.clone(), el.clone());
+                let name = el.CurrentName().map(|b| b.to_string()).unwrap_or_default();
+                Ok(Some(AppHandle { app_id: name.clone(), title: name, backend_node_id: id }))
+            }
+        })
+    }
+
     fn snapshot_app<'a>(&'a self, app: &'a AppHandle) -> BoxFuture<'a, Result<Vec<SlugNode>>> {
         Box::pin(async move {
             let window = self.find_window(&app.backend_node_id)?;
@@ -230,6 +250,10 @@ impl AccessibilityBackend for UiaBackend {
         })
     }
 
+    fn synth_input<'a>(&'a self, action: &'a Action) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move { crate::synth_windows::perform_synth(action) })
+    }
+
     fn subscribe_events(&self, _sink: EventSink) -> BoxFuture<'_, Result<Subscription>> {
         Box::pin(async move {
             // Live UIA events need COM event-sink objects implementing
@@ -318,6 +342,14 @@ unsafe fn perform(el: &IUIAutomationElement, action: &Action) -> Result<()> {
                     })
                 }
             },
+            // Synthetic OS input is routed through `synth_input` (SendInput), not
+            // node actions; reaching it here means a caller mis-routed it.
+            Action::Key(_) | Action::TypeText(_) | Action::MouseClick { .. } | Action::Scroll { .. } => {
+                return Err(BridgeError::InvalidArgs {
+                    action: action.id(),
+                    detail: "synthetic input must go through synth_input, not a node ref".into(),
+                })
+            }
         }
     }
     Ok(())

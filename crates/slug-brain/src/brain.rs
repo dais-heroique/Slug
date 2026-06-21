@@ -22,20 +22,38 @@ use crate::safety::{
 use crate::{backend, tools};
 
 const SYSTEM_PROMPT: &str = "\
-You are Slug, an agent that operates a Linux desktop through a semantic \
-accessibility layer — never screenshots. You drive native apps (Firefox, \
-gnome-text-editor, …) by reading the UI as a typed tree and acting on nodes by \
-their short ref (e.g. b1, e5).
+You are Slug, an agent that operates the desktop (macOS, Windows, or Linux) \
+through a semantic accessibility layer — never screenshots. You read the UI as a \
+typed tree and act on nodes by their short ref (e.g. b1, e5).
 
 Loop: observe → reason → act → verify.
+- Open: if the app you need isn't running, call slug_launch with its name (e.g. \
+  {\"name\":\"Spotify\"}), optionally a uri/deep link. Slug only drives running apps.
 - Observe: call slug_snapshot (scope \"focused\" by default) to read the current \
-  window. Each interactive node shows a [ref=…]. Prefer focused/window scope to \
-  keep context small; only use desktop scope when you must find another app.
-- Act: call slug_invoke with the node's ref and an action (click, focus, \
-  set_text, set_value, toggle, …). Always pass a short `reasoning` explaining why.
+  window. Each interactive node shows a [ref=…]; opaque surfaces may show @x,y. \
+  Prefer focused/window scope to keep context small; use desktop scope only to \
+  find another app.
+  - FAST PATH: real pages are huge. To find a specific control, narrow the \
+    snapshot server-side with filter (substring on the name), roles (e.g. \
+    [\"button\"], [\"entry\",\"combo_box\"], [\"static_text\"]) and/or \
+    interactive_only:true. You then get a compact flat list of just the matching \
+    nodes, each already carrying its [ref=…] AND a centre @x,y. Use this instead of \
+    reading the whole tree — it is far faster and cheaper.
+- Act, in order of preference:
+  - slug_invoke with the node's ref and an action (click, focus, set_text, \
+    set_value, toggle, …) — this is the precise, preferred way to act on controls.
+  - slug_key for the focused app: a key chord ({\"keys\":\"cmd+s\"}) or literal text \
+    ({\"keys\":\"hello\",\"mode\":\"text\"}) — works even on apps with no tree.
+  - slug_click {\"x\",\"y\"} only when there is no node to target (e.g. inside a \
+    canvas), using an @x,y hint from the snapshot.
+  - slug_scroll {\"x\",\"y\",\"dy\"} to reveal content that isn't visible yet \
+    (negative dy scrolls down) — scroll over the relevant list/grid then re-snapshot.
+  Always pass a short `reasoning` explaining why.
+- If a target you expect isn't in the snapshot, it may be off-screen or behind a \
+  search box: scroll the relevant area, or focus the app's search field (or press \
+  its search shortcut) and type the name, before giving up.
 - Verify: after each action a fresh post-action snapshot is returned to you — \
-  check that the state changed as expected before the next step. If it didn't, \
-  re-observe and adjust.
+  check the state changed as expected before the next step. If not, re-observe.
 
 Be decisive: when you can act, act. Don't re-snapshot needlessly. When the task \
 is complete, stop and reply with a one or two sentence summary of what you did. \
@@ -62,6 +80,10 @@ pub struct Outcome {
     pub escalated: bool,
 }
 
+/// An observer notified of each reasoning/action step as a JSON event (used by
+/// `slug-agent --jsonl` to stream a live log to the MCP dashboard).
+pub type StepObserver = Box<dyn Fn(serde_json::Value) + Send + Sync>;
+
 /// The agent.
 pub struct Brain {
     backend: Box<dyn LlmBackend>,
@@ -71,6 +93,7 @@ pub struct Brain {
     log: ActionLog,
     max_steps: u32,
     confirm_destructive: bool,
+    observer: Option<StepObserver>,
 }
 
 impl Brain {
@@ -91,6 +114,7 @@ impl Brain {
             log: ActionLog::new(),
             max_steps: cfg.caps.max_steps,
             confirm_destructive: cfg.safety.confirm_destructive,
+            observer: None,
         })
     }
 
@@ -110,6 +134,20 @@ impl Brain {
             log: ActionLog::new(),
             max_steps: cfg.caps.max_steps,
             confirm_destructive: cfg.safety.confirm_destructive,
+            observer: None,
+        }
+    }
+
+    /// Attach a step observer (each reasoning/action step is reported as a JSON
+    /// event). Used by `slug-agent --jsonl`.
+    pub fn with_observer(mut self, observer: StepObserver) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
+    fn emit(&self, event: serde_json::Value) {
+        if let Some(o) = &self.observer {
+            o(event);
         }
     }
 
@@ -153,6 +191,10 @@ impl Brain {
             if turn.is_final() {
                 let answer = turn.text.unwrap_or_default();
                 info!(steps, tokens = self.budget.used_tokens, "task complete");
+                self.emit(json!({
+                    "kind": "final", "step": steps, "answer": answer,
+                    "tokens": self.budget.used_tokens, "cost_usd": self.budget.used_cost_usd,
+                }));
                 return Ok(Outcome {
                     answer,
                     steps,
@@ -167,7 +209,23 @@ impl Brain {
             // Execute each requested tool, gating destructive invokes.
             let mut results: Vec<Content> = Vec::new();
             for tc in &turn.tool_calls {
+                let reasoning =
+                    tc.input.get("reasoning").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let result = self.run_tool_call(tc).await;
+                if let Content::ToolResult { content, is_error, .. } = &result {
+                    let snippet: String = content.chars().take(400).collect();
+                    self.emit(json!({
+                        "kind": "step",
+                        "step": steps,
+                        "reasoning": reasoning,
+                        "tool": tc.name,
+                        "args": tc.input,
+                        "result": snippet,
+                        "is_error": is_error,
+                        "tokens": self.budget.used_tokens,
+                        "cost_usd": self.budget.used_cost_usd,
+                    }));
+                }
                 results.push(result);
             }
             messages.push(Msg { role: Role::User, content: results });
@@ -250,32 +308,68 @@ impl Brain {
     }
 }
 
-/// Choose and construct the backend per the selection policy.
+/// Choose and construct the backend per `[brain] provider` (falling back to the
+/// legacy `[backend] selection` / hardware tier when provider is `auto`).
 fn build_backend(cfg: &Config, report: &Report) -> anyhow::Result<Box<dyn LlmBackend>> {
-    use crate::backend::{ClaudeBackend, OllamaBackend};
+    use crate::backend::{ClaudeBackend, GeminiBackend, OllamaBackend, OpenAiCompatibleBackend};
+    use crate::config::Provider;
 
-    let use_cloud = match cfg.backend.selection {
-        Selection::Cloud => true,
-        Selection::Local => false,
-        Selection::Auto => report.backend == BackendKind::Cloud,
+    // Resolve `auto` to a concrete provider.
+    let provider = match cfg.brain.provider {
+        Provider::Auto => match cfg.backend.selection {
+            Selection::Cloud => Provider::Claude,
+            Selection::Local => Provider::Ollama,
+            Selection::Auto => {
+                if report.backend == BackendKind::Cloud {
+                    Provider::Claude
+                } else {
+                    Provider::Ollama
+                }
+            }
+        },
+        p => p,
     };
 
-    if use_cloud {
-        let model = if cfg.cloud.model.is_empty() {
-            report.model.clone()
-        } else {
-            cfg.cloud.model.clone()
-        };
-        let backend = ClaudeBackend::from_env(&cfg.cloud.api_key_env, model, cfg.cloud.max_tokens)?;
-        Ok(Box::new(backend))
-    } else {
-        // Local: prefer an explicit config model, else the tier recommendation.
-        let model = if cfg.local.model.is_empty() {
-            report.model.clone()
-        } else {
-            cfg.local.model.clone()
-        };
-        Ok(Box::new(OllamaBackend::new(cfg.local.ollama_host.clone(), model, cfg.local.num_ctx)))
+    let model_or_report = |m: &str| if m.is_empty() { report.model.clone() } else { m.to_string() };
+    let max_tokens = cfg.cloud.max_tokens;
+    let p = cfg.resolved_provider(provider);
+
+    match provider {
+        Provider::Claude => {
+            Ok(Box::new(ClaudeBackend::from_env(&p.api_key_env, model_or_report(&p.model), max_tokens)?))
+        }
+        Provider::Openai => Ok(Box::new(OpenAiCompatibleBackend::from_env(
+            &p.base_url,
+            &p.api_key_env,
+            model_or_report(&p.model),
+            max_tokens,
+            "openai",
+        )?)),
+        Provider::Openrouter => Ok(Box::new(OpenAiCompatibleBackend::from_env(
+            &p.base_url,
+            &p.api_key_env,
+            model_or_report(&p.model),
+            max_tokens,
+            "openrouter",
+        )?)),
+        Provider::Gemini => Ok(Box::new(GeminiBackend::from_env(
+            &p.base_url,
+            &p.api_key_env,
+            model_or_report(&p.model),
+            max_tokens,
+        )?)),
+        Provider::Ollama => {
+            let host = if p.base_url.is_empty() { cfg.local.ollama_host.clone() } else { p.base_url };
+            let model = if !p.model.is_empty() {
+                p.model
+            } else if !cfg.local.model.is_empty() {
+                cfg.local.model.clone()
+            } else {
+                report.model.clone()
+            };
+            Ok(Box::new(OllamaBackend::new(host, model, cfg.local.num_ctx)))
+        }
+        Provider::Auto => unreachable!("auto resolved above"),
     }
 }
 

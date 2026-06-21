@@ -32,7 +32,7 @@ semantic model (`slug-core`), the MCP server (`slug-mcp`), and the agent
 | `slug-bridge` | The cross-platform accessibility harvester. One `AccessibilityBackend` trait with three implementations — `backend_atspi` (Linux/AT-SPI2), `backend_uia` (Windows/UI Automation), `backend_ax` (macOS/AX) — selected per `cfg(target_os)`. Walks application trees, maps native roles/states to Slug, executes actions, and flags opaque (vision-fallback) apps. |
 | `slug-mcp`    | The MCP server: JSON-RPC 2.0 over **stdio** and **streamable HTTP**, exposing four tools. This is the session layer that maps internal ULID refs to short agent-facing aliases (`b1`, `e5`). |
 | `slug-cli`    | A `slug` binary for driving the bus by hand (snapshot, list apps, invoke actions, stream live events). |
-| `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools, switching between a local **Ollama** model and the **Anthropic Claude API** based on detected hardware. See [Agent: local vs cloud](#agent-slug-brain). |
+| `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools. **Multi-provider**: Claude, OpenAI/OpenRouter/any OpenAI-compatible server, Gemini, or local Ollama — chosen in `slug.toml` or auto-selected from detected hardware. See [Providers](#providers-multi-provider-brain). |
 
 ```
 agent ──MCP──► slug-mcp ──► slug-bridge ──AT-SPI2 / UIA / AX──► applications
@@ -103,6 +103,13 @@ in [CI](.github/workflows/ci.yml) on `windows-latest` / `macos-latest`.
   missing, returns a typed error with these instructions (it never panics).
 - **Good first targets:** TextEdit, Finder, Safari.
 
+## Install
+
+The easiest path is a **release download** — a double-click **Slug.app** on macOS,
+an `install.ps1` on Windows, a tarball on Linux — see **[INSTALL.md](./INSTALL.md)**
+for downloads, permissions, and the AI-provider setup on every OS. To build it
+yourself instead:
+
 ## Build
 
 ```sh
@@ -138,8 +145,15 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 |------|-------|--------|
 | `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop" }` | The UI as a Playwright-style YAML tree; each node has a short `[ref=…]`. |
 | `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action. |
+| `slug_launch` | `{ "name": "Spotify", "uri"?: "spotify:playlist:…" }` | **Launch** an app by name (and optionally open a URI / deep link). Slug otherwise only drives already-running apps. See [Controlling any app](#controlling-any-app-launch-keyboard-mouse). |
+| `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. |
+| `slug_click` | `{ "x": 640, "y": 360, "reasoning"?: "…" }` | Synthetic left mouse click at absolute screen coordinates — click **anywhere**, including opaque apps. No pixels. |
+| `slug_scroll` | `{ "x": 640, "y": 360, "dy": -3, "dx"?: 0 }` | Synthetic scroll at coordinates (negative `dy` = down) to reveal off-screen content (grids, lists). No pixels. |
 | `slug_wait_for` | `{ "event_type"?: "focus_changed" \| …, "timeout_ms": 5000 }` | Blocks until a live UI event occurs or the timeout elapses. |
 | `slug_list_apps` | `{}` | Lists running applications exposing an accessibility tree. |
+| `slug_agent_start_task` | `{ "description": "…" }` | Starts the `slug-brain` agent on a task (see [Control dashboard](#mcp-native-control-dashboard)). |
+| `slug_agent_status` | `{}` | Current task, status, active provider/tier/model, last 20 reasoning/action log lines. |
+| `slug_agent_pause` / `slug_agent_resume` / `slug_agent_stop` | `{}` | Pause / resume / stop the running agent task. |
 
 Tool **execution** failures are returned inside the result object
 (`isError: true`), never as JSON-RPC protocol errors.
@@ -153,6 +167,83 @@ Example snapshot output:
   - entry "Document name" [ref=i1] [focused]
     - text "untitled" [ref=e2]
 ```
+
+## Why `slug_snapshot` is not a screenshot
+
+The name *snapshot* means a **point-in-time read of the semantic document**, in the
+database sense — not an image. A `slug_snapshot` returns text (YAML): for each
+element its **role, name, state, and `ref`**. There is **no image, pixel buffer,
+screen capture, or OCR anywhere in the pipeline** — the bridge reads the OS
+accessibility tree (AT-SPI2 / UIA / AX) directly, and the agent acts on `ref`s.
+
+This is the whole thesis: the agent perceives structured meaning, not pixels.
+It's cheaper, deterministic, and legible — the [control dashboard](#mcp-native-control-dashboard)
+renders the *exact same text* the agent reads, so a human supervising the agent
+sees no screenshots either. (This note is mirrored in the `slug_snapshot` MCP
+tool description so MCP clients see it too.)
+
+## Controlling any app (launch, keyboard, mouse)
+
+A full task like *"open Spotify and play my playlist"* uses three capabilities:
+
+1. **Launch** the app — `slug_launch { "name": "Spotify" }` (Slug otherwise only
+   drives already-running apps). You can also open a deep link:
+   `slug_launch { "name": "Spotify", "uri": "spotify:playlist:37i9dQ…" }`.
+2. **Click inside it** — for apps with an accessibility tree (Spotify, Safari,
+   Finder, most native and Electron apps) the agent reads `slug_snapshot` and
+   clicks elements with `slug_invoke { ref, action: "click" }`. That *is* clicking
+   inside the app, on real controls — not just opening it.
+3. **Type / shortcuts / click anywhere** — `slug_key` for keyboard, `slug_click`
+   for a mouse click at coordinates.
+
+So the flow is: `slug_launch Spotify` → `slug_snapshot focused` → find the playlist
+→ `slug_invoke <ref> click` (or `slug_key`/`slug_click`). Each step verifies with a
+fresh snapshot.
+
+**Clicking opaque surfaces (canvas/graphics).** On macOS, `slug_invoke … click`
+auto-falls back to a synthetic mouse click at the node's centre when the element
+exposes geometry but no accessibility press action — so "click" works on canvas
+nodes too, with no extra calls. And for those opaque surfaces the snapshot prints
+a centre coordinate hint (`@x,y` after the node) so the agent can `slug_click x,y`
+a specific spot. Normal controls omit coordinates (clicked by ref — keeps the
+snapshot small).
+
+Most apps expose an accessibility tree, so the agent reads them with `slug_snapshot`
+and acts with `slug_invoke` on a `ref`. Some apps expose **no** (or only a partial)
+tree — games, some canvas apps — and show up as *opaque*. To drive those too,
+`slug_key` injects **synthetic OS keyboard input**, and `slug_click` a **synthetic
+mouse click** at coordinates, into the focused app:
+
+```jsonc
+// a key chord (shortcuts, navigation): cmd+s, shift+tab, return, escape, up …
+{ "name": "slug_key", "arguments": { "keys": "cmd+s", "mode": "chord" } }
+// literal text typed into whatever has focus
+{ "name": "slug_key", "arguments": { "keys": "hello world", "mode": "text" } }
+// optionally focus an accessible field first, then type
+{ "name": "slug_key", "arguments": { "ref": "i1", "keys": "hello", "mode": "text" } }
+```
+
+This is still **no pixels and no model tokens**: it posts an OS input event, it does
+**not** capture or analyse the screen. It is the lightweight alternative to a
+screenshot+vision fallback — it works on any app the OS can route keystrokes to,
+without the cost and storage of images.
+
+Implemented on **macOS** (Quartz `CGEvent`; needs Accessibility — and on recent
+macOS, Input Monitoring — permission) and **Windows** (`SendInput`; no special
+permission). On **Linux**, synthetic input is constrained by the OS itself —
+Wayland blocks event injection by design and X11 would need XTEST — so `slug_key`
+returns a clear, explained tool error there (never a crash); the semantic path
+(`slug_snapshot`/`slug_invoke`) remains fully functional on Linux. The macOS and
+Windows synthetic paths are compile-verified on their target triples and need a
+real-hardware smoke test, as with the rest of the per-OS backends.
+
+### Snapshot latency
+
+`focused`/`window` snapshots deep-walk only the **frontmost application** (via the
+backend's `focused_app`), not the whole desktop, and the session keeps a short
+(250 ms) snapshot cache that is invalidated on every action — so the dashboard's
+polling and the agent's read-act-verify loop stay responsive without re-harvesting
+the entire accessibility tree each time. `desktop` scope still harvests everything.
 
 ## Connect Claude Code
 
@@ -275,20 +366,48 @@ model/quant mapping and all caps are overridable in `slug.toml`. The cloud model
 defaults to `claude-sonnet-4-6` (Doc 5's `cloud_model`); switch to
 `claude-opus-4-8` by setting `cloud.model` in `slug.toml`.
 
-### Backends
+### Providers (multi-provider brain)
 
-Both backends are driven with **identical tool schemas** behind one
-`LlmBackend` trait:
+All providers are driven with **identical tool schemas** behind one `LlmBackend`
+trait. Select one in `slug.toml`; keys are read from env vars named in the config
+and are **never stored in the file**:
 
-- **`ClaudeBackend`** — Anthropic Messages API over raw HTTP (no official Rust
-  SDK). Implements the documented tool-use loop: send the `tools` array, and on
-  `stop_reason = "tool_use"` execute the `tool_use` blocks and append
-  `tool_result` blocks on the next turn.
-- **`OllamaBackend`** — Ollama `/api/chat` function-calling, with the same tools
-  wrapped in `{type:"function", …}` and tool results returned as `role:"tool"`.
+```toml
+[brain]
+provider = "claude"   # auto | claude | openai | openrouter | gemini | ollama
 
-Set the Claude key via the env var named in `slug.toml` (`api_key_env`, default
-`ANTHROPIC_API_KEY`); run `ollama serve` and `ollama pull <model>` for local.
+[providers.claude]     # api_key_env defaults shown; model overridable
+api_key_env = "ANTHROPIC_API_KEY"
+model = "claude-sonnet-4-6"
+
+[providers.openai]     # also drives any OpenAI-compatible server (vLLM, LM Studio, llama.cpp)
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1"
+model = "gpt-4o"
+
+[providers.openrouter]
+api_key_env = "OPENROUTER_API_KEY"
+base_url = "https://openrouter.ai/api/v1"
+model = "openai/gpt-4o"
+
+[providers.gemini]
+api_key_env = "GEMINI_API_KEY"
+model = "gemini-2.0-flash"
+
+[providers.ollama]
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:8b"
+```
+
+| Provider | Implementation | Endpoint |
+|----------|----------------|----------|
+| `claude` | `ClaudeBackend` | Anthropic Messages API (`tool_use` loop) |
+| `openai` / `openrouter` / local | `OpenAiCompatibleBackend` | `POST {base_url}/chat/completions` with `tools`; parses `tool_calls` |
+| `gemini` | `GeminiBackend` | `generateContent`; tools as `function_declarations`, parses `functionCall` parts |
+| `ollama` | `OllamaBackend` | `/api/chat` function-calling |
+
+With `provider = "auto"` the hardware tier decides (cloud → claude, local →
+ollama). The `--probe` report recommends a provider too.
 
 ### Safety
 
@@ -305,6 +424,56 @@ Set the Claude key via the env var named in `slug.toml` (`api_key_env`, default
 `slug-brain` ships unit tests for the tiering logic (mocked probes) and a scripted
 backend that exercises the full loop, the caps, and the destructive gate without
 a network or a bus.
+
+## MCP-native control dashboard
+
+A human can supervise and drive the agent through the **same MCP transport** — no
+separate protocol. `slug-mcp` exposes agent-control tools (`slug_agent_start_task`,
+`slug_agent_status`, `slug_agent_pause`, `slug_agent_resume`, `slug_agent_stop`),
+and serves a tiny static dashboard at **`GET /dashboard`** (when run with
+`--http`). It is a single self-contained HTML/JS file (no framework) laid out in
+three columns — **agent control** (task box, start/pause/resume/stop, live
+provider/tier/model badge, connection indicator), **semantic tree** (role-coloured,
+clickable `ref` chips, state pills, scope selector), and **action log** (reasoning/
+result lines, errors in red). It:
+
+- polls `slug_agent_status` (≈1 s while a task runs, throttled to 3 s when idle, and
+  paused entirely when the browser tab is hidden — low latency, low overhead);
+- renders the live semantic tree from `slug_snapshot` **as text** — the exact
+  hierarchy the agent reads;
+- has a text box that calls `slug_agent_start_task`.
+
+Its header states, verbatim: *“Slug never captures pixels. Everything below is the
+same structured text the agent reads.”*
+
+```sh
+slug-mcp --http 127.0.0.1:7333      # then open http://127.0.0.1:7333/dashboard
+```
+
+To avoid a crate cycle (`slug-brain` depends on `slug-mcp`), the controller drives
+`slug-agent --jsonl` as a child process and parses its JSON-lines event stream; set
+`SLUG_AGENT_BIN` if it isn't installed next to `slug-mcp`.
+
+### HTTP security
+
+The `slug-mcp` HTTP server can read on-screen content and drive the desktop, so it
+must never be reachable from a web page in your browser. It binds **loopback only**
+(`127.0.0.1`) and additionally validates the request **`Origin` and `Host`** on
+`POST /mcp`: any non-local value is rejected with `403`, blocking cross-site
+(CSRF) and DNS-rebinding attacks. Local CLI clients (Claude Code, `curl`) send no
+`Origin` and a local `Host`, so they pass unchanged.
+
+## Install (macOS)
+
+```sh
+./slug-install/install.sh
+```
+
+Builds the Rust binaries (a few MB — **no models are downloaded**), writes a
+starter `~/.slug/slug.toml` (defaulting to `ollama` if detected, else `claude`),
+and registers a launchd agent that runs `slug-mcp --http` at login with the
+dashboard. See [`slug-install/README.md`](./slug-install/README.md) (Windows is a
+documented manual path for now).
 
 ## Milestone-1 adaptations
 

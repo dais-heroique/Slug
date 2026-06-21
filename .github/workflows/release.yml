@@ -1,0 +1,120 @@
+name: Release
+
+# Build downloadable Slug apps/binaries for macOS, Windows and Linux and publish
+# them to a GitHub Release. Trigger by pushing a tag like `v0.1.0`, or run
+# manually (workflow_dispatch) to produce artifacts without a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: package (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+          - os: macos-14
+            name: macos-arm64
+          - os: macos-13
+            name: macos-x86_64
+          - os: windows-latest
+            name: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binaries
+        run: cargo build --release -p slug-mcp -p slug-cli -p slug-brain
+
+      # ---- Package (Unix: macOS + Linux) -----------------------------------
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME:-dev}"
+          OUT="dist"
+          STAGE="slug-${VER}-${{ matrix.name }}"
+          mkdir -p "$OUT/$STAGE"
+          cp target/release/slug-mcp target/release/slug target/release/slug-agent "$OUT/$STAGE/"
+          cp slug-install/install.sh "$OUT/$STAGE/" 2>/dev/null || true
+          cp INSTALL.md README.md "$OUT/$STAGE/" 2>/dev/null || true
+          # macOS: also build a double-clickable Slug.app, a zip, and a drag-to-
+          # install .dmg (signed/notarized automatically if the secrets are set).
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            bash slug-install/make-macos-app.sh "target/release" "$OUT"
+            ( cd "$OUT" && zip -r "Slug-${VER}-${{ matrix.name }}.app.zip" "Slug.app" )
+            bash slug-install/make-macos-dmg.sh "$OUT/Slug.app" "$OUT/Slug-${VER}-${{ matrix.name }}.dmg"
+          fi
+          tar -C "$OUT" -czf "$OUT/$STAGE.tar.gz" "$STAGE"
+          ls -la "$OUT"
+        env:
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          AC_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+
+      # ---- Package (Windows) -----------------------------------------------
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME; if (-not $ver) { $ver = "dev" }
+          $stage = "dist/slug-$ver-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/release/slug-mcp.exe,target/release/slug.exe,target/release/slug-agent.exe $stage
+          Copy-Item slug-install/install.ps1 $stage -ErrorAction SilentlyContinue
+          Copy-Item INSTALL.md,README.md $stage -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/slug-$ver-${{ matrix.name }}.zip" -Force
+          Get-ChildItem dist
+
+      # ---- Windows installer (.exe) via Inno Setup -------------------------
+      - name: Build Windows installer (.exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME; if (-not $ver) { $ver = "0.1.0" }
+          $verNum = $ver.TrimStart('v')
+          $payload = "slug-install/windows/payload"
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          Copy-Item target/release/slug-mcp.exe,target/release/slug.exe,target/release/slug-agent.exe $payload
+          choco install innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & "$iscc" "/DMyAppVersion=$verNum" "slug-install/windows/slug.iss"
+          # slug.iss writes dist/SlugSetup.exe — give it a versioned name too.
+          Copy-Item "dist/SlugSetup.exe" "dist/SlugSetup-$ver-${{ matrix.name }}.exe" -Force
+          Get-ChildItem dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slug-${{ matrix.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.dmg
+            dist/SlugSetup-*.exe
+
+      - name: Publish to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.dmg
+            dist/SlugSetup-*.exe
+          generate_release_notes: true

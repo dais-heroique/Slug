@@ -31,13 +31,20 @@ pub mod action;
 pub mod backend;
 pub mod coverage;
 pub mod error;
+pub mod launch;
 
 #[cfg(target_os = "linux")]
 pub mod backend_atspi;
+#[cfg(target_os = "linux")]
+pub mod synth_linux;
 #[cfg(target_os = "macos")]
 pub mod backend_ax;
+#[cfg(target_os = "macos")]
+pub mod synth_macos;
 #[cfg(target_os = "windows")]
 pub mod backend_uia;
+#[cfg(target_os = "windows")]
+pub mod synth_windows;
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -117,6 +124,17 @@ impl Bridge {
         self.snapshot_apps(&apps).await
     }
 
+    /// Harvest only the **focused** application when the backend can identify it
+    /// (fast path for `focused`/`window` scope); otherwise fall back to a full
+    /// desktop harvest. This is the main snapshot-latency optimisation.
+    #[instrument(skip(self))]
+    pub async fn snapshot_focused(&self) -> Result<SnapshotResult> {
+        if let Some(app) = self.backend.focused_app().await? {
+            return self.snapshot_apps(std::slice::from_ref(&app)).await;
+        }
+        self.snapshot_desktop().await
+    }
+
     /// Harvest a single application by name / native id / ref.
     #[instrument(skip(self))]
     pub async fn snapshot_app(&self, app_key: &str) -> Result<SnapshotResult> {
@@ -179,6 +197,35 @@ impl Bridge {
         info!(%slug_ref, action = %action.id(), "invoke");
         self.backend.invoke(&BackendNodeId(slug_ref.to_string()), &action).await?;
         Ok(true)
+    }
+
+    /// Inject synthetic OS input (key chord or literal text) into the focused
+    /// application. Works on any app, including opaque ones — no node ref, no
+    /// pixels. `verb` must be a synthetic verb (`key`/`hotkey`/`type_text`).
+    #[instrument(skip(self), fields(reasoning = reasoning.unwrap_or("")))]
+    pub async fn synth_input(
+        &self,
+        verb: &str,
+        arg: Option<&str>,
+        reasoning: Option<&str>,
+    ) -> Result<bool> {
+        let action = Action::parse(verb, arg)?;
+        if !action.is_synthetic() {
+            return Err(BridgeError::InvalidArgs {
+                action: action.id(),
+                detail: "not a synthetic-input verb (use key/hotkey/type_text)".into(),
+            });
+        }
+        info!(action = %action.id(), "synth_input");
+        self.backend.synth_input(&action).await?;
+        Ok(true)
+    }
+
+    /// Launch an application by name (e.g. `Spotify`), optionally opening a URI /
+    /// deep link with it. The agent uses this to start an app before driving it.
+    pub async fn launch_app(&self, name: &str, uri: Option<&str>) -> Result<()> {
+        info!(name, uri = uri.unwrap_or(""), "launch_app");
+        crate::launch::launch(name, uri)
     }
 
     /// Subscribe to live semantic events. The subscription is kept alive for the

@@ -9,7 +9,7 @@
 
 use std::net::SocketAddr;
 
-use slug_mcp::{server, Session};
+use slug_mcp::{server, AgentController, Session};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
     let mode = args.next();
 
     let session = Session::new();
+    let control = AgentController::new();
 
     match mode.as_deref() {
         Some("--http") => {
@@ -26,9 +27,9 @@ async fn main() -> anyhow::Result<()> {
                 .next()
                 .unwrap_or_else(|| "127.0.0.1:7333".to_string())
                 .parse()?;
-            server::run_http(session, addr).await
+            server::run_http(session, control, addr).await
         }
-        Some("--stdio") | None => server::run_stdio(session).await,
+        Some("--stdio") | None => server::run_stdio(session, control).await,
         Some(other) => {
             eprintln!("unknown argument: {other}\nusage: slug-mcp [--stdio | --http [ADDR]]");
             std::process::exit(2);

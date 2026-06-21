@@ -142,12 +142,14 @@ impl fmt::Display for Report {
         writeln!(f, "Tier:       {:?} — {}", self.tier, self.tier.summary())?;
         match self.backend {
             BackendKind::Cloud => {
-                writeln!(f, "Backend:    Claude API (cloud)")?;
+                writeln!(f, "Backend:    cloud")?;
+                writeln!(f, "Provider:   claude (default) — or set [brain] provider = openai | openrouter | gemini")?;
                 writeln!(f, "Model:      {}", self.model)?;
-                writeln!(f, "Note:       set ANTHROPIC_API_KEY (or slug.toml api_key_env) to use it.")?;
+                writeln!(f, "Note:       set the provider's API key env var (e.g. ANTHROPIC_API_KEY) to use it.")?;
             }
             BackendKind::Local => {
-                writeln!(f, "Backend:    Ollama (local)")?;
+                writeln!(f, "Backend:    local")?;
+                writeln!(f, "Provider:   ollama")?;
                 writeln!(f, "Model:      {} [{}]", self.model, self.quant)?;
                 writeln!(f, "Pull with:  ollama pull {}", self.model)?;
                 if !self.ram_ok {
