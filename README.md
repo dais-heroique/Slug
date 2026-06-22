@@ -246,6 +246,15 @@ renders the *exact same text* the agent reads, so a human supervising the agent
 sees no screenshots either. (This note is mirrored in the `slug_snapshot` MCP
 tool description so MCP clients see it too.)
 
+**How much cheaper?** A reproducible comparison for playing chess.com —
+[`docs/BENCH-vision-vs-slug.md`](./docs/BENCH-vision-vs-slug.md) — measures it with
+this repo's own serializer: **one 1280×800 screenshot ≈ 1,365 tokens, more than
+reading the entire 40-move game as text (~828 tokens)**, and a filtered Slug loop
+costs **~4× fewer input tokens than a screenshot loop over a full game** (~$0.085
+vs ~$0.35 at $3/Mtok). It also shows the honest caveat — a *naïve* full-snapshot
+loop is *worse* than vision, which is why snapshots are filtered. Reproduce with
+`cargo test -p slug-core --test snapshot_vs_vision -- --nocapture report`.
+
 ## Controlling any app (launch, keyboard, mouse)
 
 A full task like *"open Spotify and play my playlist"* uses three capabilities:
