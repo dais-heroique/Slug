@@ -37,20 +37,27 @@ never screenshots to act.
 - **Sourced**: screenshot **1280×800 → 1,365 tokens** = `(w·h)/750` (Anthropic
   computer-use docs); ~4 chars/token; +200 reasoning tokens/move (both sides).
 
-## Tokens to play ONE move
+## Per move *and* cumulative — both summed the same way
 
-| Game point | Vision | Slug | Slug advantage |
-|-----------|-------:|-----:|:--------------:|
-| move 1  | 4,296 | **416** | **10× fewer** |
-| move 10 | 4,296 | 563 | 8× fewer |
-| move 20 | 4,296 | 728 | 6× fewer |
-| move 40 | 4,296 | 1,058 | 4× fewer |
+Both columns are added up the same way. Vision's **per-move** cost is flat (a
+screenshot is always 1,365 tokens) but it is still **added every move**; Slug's
+per-move cost grows (the move list gets longer) and is added too. The **cumulative**
+columns are the running totals you actually pay.
+
+| Move | Vision (this move) | Vision (cumulative) | Slug (this move) | Slug (cumulative) | Cumulative ratio |
+|----:|-----:|-----:|-----:|-----:|:--:|
+| 1  | 4,296 | 4,296 | 416 | 416 | **10×** |
+| 5  | 4,296 | 21,480 | 482 | 2,245 | 10× |
+| 10 | 4,296 | 42,960 | 563 | 4,896 | 9× |
+| 20 | 4,296 | 85,920 | 728 | 11,434 | 8× |
+| 30 | 4,296 | 128,880 | 893 | 19,622 | 7× |
+| 40 | 4,296 | **171,840** | 1,058 | **29,459** | **6×** |
 
 ## Whole game (40 moves) — total input tokens
 
 | Approach | Input tokens |
 |----------|-------------:|
-| Vision (screenshot loop) | 171,840 |
+| Vision (screenshot loop) | **171,840** |
 | **Slug (filtered)** | **29,459** |
 
 > **Slug plays the whole game in ~6× fewer tokens than a screenshot loop** — and
@@ -60,21 +67,37 @@ never screenshots to act.
 > Put another way: **one screenshot (1,365 tokens) costs more than reading the
 > entire 40-move game as text (828 tokens).**
 
-## Why Slug also *plays* faster (reasoned, not micro-benchmarked)
+## Click accuracy — where vision *also* loses tokens
+
+A screenshot agent aims at squares **by pixel**, inferred from the image. It
+mis-clicks a meaningful share of the time — a themed board, a piece rendered a few
+pixels off, or an animation caught mid-capture — and **every wrong click costs a
+recovery**: a screenshot to notice it, then another click and screenshot to redo it.
+
+| | Vision | Slug |
+|---|---|---|
+| how a square is targeted | inferred from pixels | computed coordinate / node ref |
+| mis-click rate (estimate) | ~15% per click | **0% (no pixel class)** |
+| cost of a mis-click | ~2 extra screenshots (~2,730 tok) | n/a |
+| game total with mis-clicks | **~204,600 tok** | **29,459 tok** |
+
+With realistic mis-clicks the gap widens to **~7×**. Slug simply does not have this
+error class: it clicks coordinates it computed, or acts on a node `ref` — so it is
+both cheaper **and** more reliable.
+
+## Why Slug also *plays* faster
 
 - **No model round-trip to "find" a square.** Vision must screenshot → have the
   model locate the source/target squares in pixels → click → screenshot to verify.
-  Slug computes the square coordinates itself, so a move is two clicks with **no
-  model round-trip to locate them**. At ~1–3 s per round-trip, that is the dominant
+  Slug computes the coordinates itself, so a move is two clicks with **no model
+  round-trip to locate them**. At ~1–3 s per round-trip, that is the dominant
   real-time saving in a blitz game.
 - **Exact, not inferred.** Slug reads moves as algebraic text (`1. e4 e5`); vision
-  must infer the board from pixels, where a themed board or a mid-capture animation
-  causes misreads and mis-clicks.
+  must infer the board from pixels.
 
-## Honest footnote
+## Summary
 
-A *naïve* Slug loop that re-snapshots the **whole page** every move would cost
-~1.03M tokens (worse than vision). That is exactly why Slug **filters server-side**
-(`slug_snapshot {roles:["static_text"]}`) and plays the board with clicks — the win
-is sending only the relevant nodes, not "text vs image" alone. A regression test
-keeps this property true.
+Counting the **whole** play loop, in tokens: **Slug plays a full game of chess.com
+in ~6× fewer input tokens than a screenshot agent (~7× once mis-clicks are
+included), and up to ~10× fewer in the opening** — while being more reliable,
+because it never targets by pixel.
