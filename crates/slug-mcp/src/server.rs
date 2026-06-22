@@ -251,6 +251,55 @@ pub async fn run_http(
         }
     }
 
+    /// AI provider catalog + which one is active + key presence.
+    async fn providers_get(headers: axum::http::HeaderMap) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        Json(crate::dashboard_api::providers_status()).into_response()
+    }
+
+    /// Activate an AI provider. Body: `{ slot, base_url?, key_env?, model }`.
+    async fn providers_set(
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let slot = body.get("slot").and_then(Value::as_str).unwrap_or("");
+        let base_url = body.get("base_url").and_then(Value::as_str).unwrap_or("");
+        let key_env = body.get("key_env").and_then(Value::as_str).unwrap_or("");
+        let model = body.get("model").and_then(Value::as_str).unwrap_or("");
+        match crate::dashboard_api::set_provider(slot, base_url, key_env, model) {
+            Ok(list) => Json(list).into_response(),
+            Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
+        }
+    }
+
+    /// Inject an API key for THIS SESSION only. Body: `{ env, value }`.
+    /// The value is set as an environment variable in the running process (and so
+    /// inherited by the agent it spawns) — it is **never written to disk** and is
+    /// gone on restart.
+    async fn provider_key(
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let env = body.get("env").and_then(Value::as_str).unwrap_or("");
+        let value = body.get("value").and_then(Value::as_str).unwrap_or("");
+        if env.is_empty() || value.is_empty() {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "env and value required" })))
+                .into_response();
+        }
+        // In-memory only; inherited by the spawned agent. Never persisted.
+        std::env::set_var(env, value);
+        Json(serde_json::json!({ "ok": true, "env": env, "key_present": crate::dashboard_api::key_present(env) }))
+            .into_response()
+    }
+
     /// Accept a request only if it is local: any present `Origin` and `Host`
     /// header must point at loopback. This blocks cross-site / DNS-rebinding
     /// attacks while leaving local CLI clients (no Origin) untouched.
@@ -291,6 +340,8 @@ pub async fn run_http(
         .route("/approvals", get(list_approvals))
         .route("/approve", post(decide_approval))
         .route("/mcp-servers", get(mcp_servers_list).post(mcp_servers_add).delete(mcp_servers_remove))
+        .route("/providers", get(providers_get).post(providers_set))
+        .route("/provider-key", post(provider_key))
         .route("/healthz", get(|| async { "ok" }))
         .with_state(AppState {
             session,

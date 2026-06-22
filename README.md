@@ -454,9 +454,18 @@ defaults to `claude-sonnet-4-6` (Doc 5's `cloud_model`); switch to
 
 ### Providers (multi-provider brain)
 
+Slug talks to virtually every AI API. Pick one from the **Brain tab in the
+dashboard** — no file editing — or set it in `slug.toml`. The dashboard catalog
+covers **Anthropic (Claude), Google Gemini, OpenRouter (a gateway to all models),
+OpenAI, Groq, Mistral, DeepSeek, xAI (Grok), Together, Perplexity, and local
+Ollama**; any other OpenAI-compatible endpoint works via a custom `base_url`.
+Activating one writes `slug.toml` for you; **API keys are never written** — they're
+read from the named env var (you can paste a key in the dashboard to keep it in
+memory for the session only).
+
 All providers are driven with **identical tool schemas** behind one `LlmBackend`
-trait. Select one in `slug.toml`; keys are read from env vars named in the config
-and are **never stored in the file**:
+trait. Keys are read from env vars named in the config and are **never stored in
+the file**:
 
 ```toml
 [brain]
@@ -485,12 +494,13 @@ base_url = "http://127.0.0.1:11434"
 model = "qwen3:8b"
 ```
 
-| Provider | Implementation | Endpoint |
+| Provider slot | Implementation | Endpoint |
 |----------|----------------|----------|
 | `claude` | `ClaudeBackend` | Anthropic Messages API (`tool_use` loop) |
-| `openai` / `openrouter` / local | `OpenAiCompatibleBackend` | `POST {base_url}/chat/completions` with `tools`; parses `tool_calls` |
+| `openai` (+ Groq / Mistral / DeepSeek / xAI / Together / Perplexity / local via `base_url`) | `OpenAiCompatibleBackend` | `POST {base_url}/chat/completions` with `tools`; parses `tool_calls` |
+| `openrouter` | `OpenAiCompatibleBackend` | OpenRouter — one key, every model |
 | `gemini` | `GeminiBackend` | `generateContent`; tools as `function_declarations`, parses `functionCall` parts |
-| `ollama` | `OllamaBackend` | `/api/chat` function-calling |
+| `ollama` | `OllamaBackend` | `/api/chat` function-calling (local) |
 
 With `provider = "auto"` the hardware tier decides (cloud → claude, local →
 ollama). The `--probe` report recommends a provider too.

@@ -110,6 +110,12 @@
   .app-item{padding:7px 0; border-bottom:1px solid #17171f; display:flex; gap:8px; align-items:center}
   .app-item .nm{font-weight:600} .app-item .bus{color:var(--dim); font-size:11px; margin-left:auto}
   .note{color:var(--dim); font-size:11px; padding:8px 14px; border-top:1px solid var(--line)}
+  /* ---- providers ---- */
+  .prov{padding:10px 0; border-bottom:1px solid #17171f}
+  .prov.on{background:#0d1726; border:1px solid #1d3350; border-radius:9px; padding:10px; margin:4px 0}
+  .prow{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
+  .prow2{display:flex; gap:7px; margin-top:8px; flex-wrap:wrap}
+  .prov .pm{max-width:190px} .prov .pk{flex:1; min-width:140px}
   ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:#23232d;border-radius:8px}
 </style>
 </head>
@@ -176,10 +182,16 @@
   <section class="col">
     <div class="tabs">
       <div class="tab active" data-tab="log" onclick="showTab('log')">Activity</div>
+      <div class="tab" data-tab="brain" onclick="showTab('brain')">Brain</div>
       <div class="tab" data-tab="mcp" onclick="showTab('mcp')">MCP <span class="badge" id="mcpBadge">0</span></div>
       <div class="tab" data-tab="apps" onclick="showTab('apps')">Apps <span class="badge" id="appsBadge">0</span></div>
     </div>
     <div class="pane active" id="pane-log"><div class="body log" id="log"><span class="empty">no activity yet</span></div></div>
+    <div class="pane" id="pane-brain"><div class="body">
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Connect an AI provider (API)</div>
+      <div id="providers"><span class="empty">…</span></div>
+      <div class="note" style="border:none;padding:8px 0 0">Keys are read from env vars and never written to disk. A key you paste here is kept in memory for this session only.</div>
+    </div></div>
     <div class="pane" id="pane-mcp">
       <div class="body">
         <div id="mcpList"><span class="empty">…</span></div>
@@ -366,11 +378,46 @@ async function decide(id,approved){
     body:JSON.stringify({id,approved})}); }catch(e){} refreshApprovals();
 }
 
+// ---------- AI providers (connect via API) ----------
+async function refreshProviders(){
+  try{
+    const j=await jget('/providers'); const ps=j.providers||[];
+    window._prov={}; ps.forEach(p=>window._prov[p.id]=p);
+    document.getElementById('providers').innerHTML=ps.map(p=>{
+      const kindcls=p.kind==='local'?'command':(p.kind==='gateway'?'self':'self');
+      const keyTag=p.key_env?(p.key_present?'<span class="stat reachable">key set</span>':`<span class="stat unreachable">set $${esc(p.key_env)}</span>`):'<span class="stat command">no key</span>';
+      const keyInput=p.key_env?`<input class="f pk" data-id="${esc(p.id)}" type="password" placeholder="paste key (session only, optional)"/>`:'';
+      return `<div class="prov ${p.active?'on':''}">
+        <div class="prow"><b>${esc(p.label)}</b> <span class="stat ${kindcls}">${esc(p.kind)}</span> ${keyTag} ${p.active?'<span class="stat reachable">active</span>':''}</div>
+        <div class="prow2">
+          <input class="f pm" data-id="${esc(p.id)}" value="${esc(p.model)}" placeholder="model"/>
+          ${keyInput}
+          <button class="primary" onclick="connectProvider('${esc(p.id)}')">${p.active?'Update':'Connect'}</button>
+        </div></div>`;
+    }).join('')||'<span class="empty">none</span>';
+  }catch(e){ document.getElementById('providers').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
+}
+async function connectProvider(id){
+  const p=(window._prov||{})[id]; if(!p)return;
+  const model=(document.querySelector(`.pm[data-id="${id}"]`).value||'').trim()||p.default_model;
+  const keyEl=document.querySelector(`.pk[data-id="${id}"]`);
+  try{
+    if(keyEl&&keyEl.value.trim()&&p.key_env){
+      await fetch('/provider-key',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({env:p.key_env,value:keyEl.value.trim()})});
+    }
+    const r=await fetch('/providers',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({slot:p.slot,base_url:p.base_url,key_env:p.key_env,model})});
+    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status));}
+    refreshProviders(); refreshInfo();
+  }catch(e){ alert(e.message); }
+}
+
 // ---------- tabs ----------
 function showTab(t){
   document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.tab===t));
   document.querySelectorAll('.pane').forEach(e=>e.classList.toggle('active',e.id==='pane-'+t));
-  if(t==='mcp') refreshMcp(); if(t==='apps') refreshApps();
+  if(t==='mcp') refreshMcp(); if(t==='apps') refreshApps(); if(t==='brain') refreshProviders();
 }
 
 // ---------- actions ----------

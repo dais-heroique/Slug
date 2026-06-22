@@ -81,6 +81,129 @@ pub fn provider_is_local(provider: &str) -> bool {
     matches!(provider, "ollama" | "local")
 }
 
+// ------------------------------ AI providers -------------------------------
+//
+// "Connect via API" from the dashboard. Every entry maps to one of the brain's
+// provider slots (`claude` / `gemini` / `openrouter` / `openai` / `ollama`); the
+// many OpenAI-compatible services (Groq, Mistral, DeepSeek, xAI, Together,
+// Perplexity, local servers) all ride the `openai` slot with their own base_url.
+// Activating one writes `slug.toml`; **API keys are never written** — they are read
+// from the named env var (you can also inject one in-memory for this session).
+
+/// (id, label, slot, base_url, key_env, default_model, kind)
+type Preset = (&'static str, &'static str, &'static str, &'static str, &'static str, &'static str, &'static str);
+
+pub fn provider_catalog() -> Vec<Preset> {
+    vec![
+        ("anthropic", "Anthropic (Claude)", "claude", "", "ANTHROPIC_API_KEY", "claude-sonnet-4-6", "cloud"),
+        ("gemini", "Google Gemini", "gemini", "", "GEMINI_API_KEY", "gemini-2.0-flash", "cloud"),
+        ("openrouter", "OpenRouter (all models)", "openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "openai/gpt-4o", "gateway"),
+        ("openai", "OpenAI", "openai", "https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-4o", "cloud"),
+        ("groq", "Groq", "openai", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile", "cloud"),
+        ("mistral", "Mistral", "openai", "https://api.mistral.ai/v1", "MISTRAL_API_KEY", "mistral-large-latest", "cloud"),
+        ("deepseek", "DeepSeek", "openai", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "deepseek-chat", "cloud"),
+        ("xai", "xAI (Grok)", "openai", "https://api.x.ai/v1", "XAI_API_KEY", "grok-2-latest", "cloud"),
+        ("together", "Together AI", "openai", "https://api.together.xyz/v1", "TOGETHER_API_KEY", "meta-llama/Llama-3.3-70B-Instruct-Turbo", "cloud"),
+        ("perplexity", "Perplexity", "openai", "https://api.perplexity.ai", "PERPLEXITY_API_KEY", "sonar", "cloud"),
+        ("ollama", "Ollama (local)", "ollama", "http://127.0.0.1:11434", "", "qwen3:8b", "local"),
+    ]
+}
+
+/// Read a `key = "value"` from a given `[section]` of slug.toml (best effort).
+fn config_value(section: &str, key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(config_path()).ok()?;
+    let mut cur = String::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            cur = line[1..line.len() - 1].trim().to_string();
+        } else if cur == section {
+            if let Some((k, v)) = line.split_once('=') {
+                if k.trim() == key {
+                    return Some(v.trim().trim_matches('"').trim().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Catalog + which preset is active + whether each key env is set in this process.
+pub fn providers_status() -> Value {
+    let (active_provider, active_model) = brain_info();
+    let active_base = config_value(&format!("providers.{active_provider}"), "base_url").unwrap_or_default();
+
+    let items: Vec<Value> = provider_catalog()
+        .into_iter()
+        .map(|(id, label, slot, base_url, key_env, default_model, kind)| {
+            // Active if the brain slot matches and (for the shared openai slot) the
+            // base_url matches too.
+            let active = slot == active_provider
+                && (slot != "openai" || base_url == active_base || active_base.is_empty() && id == "openai");
+            let key_present = if key_env.is_empty() {
+                true // local (ollama) needs no key
+            } else {
+                std::env::var(key_env).map(|v| !v.trim().is_empty()).unwrap_or(false)
+            };
+            json!({
+                "id": id, "label": label, "slot": slot, "base_url": base_url,
+                "key_env": key_env, "default_model": default_model, "kind": kind,
+                "key_present": key_present, "active": active,
+                "model": if active { active_model.clone() } else { default_model.to_string() },
+            })
+        })
+        .collect();
+
+    json!({ "active": { "provider": active_provider, "model": active_model }, "providers": items })
+}
+
+/// Activate a provider: rewrite slug.toml's `[brain]` + the chosen
+/// `[providers.<slot>]` block, preserving `[caps]`/`[safety]`. Keys are NOT stored.
+pub fn set_provider(slot: &str, base_url: &str, key_env: &str, model: &str) -> Result<Value, String> {
+    let valid = ["claude", "gemini", "openrouter", "openai", "ollama"];
+    if !valid.contains(&slot) {
+        return Err(format!("unknown provider slot '{slot}'"));
+    }
+    if model.trim().is_empty() {
+        return Err("a model is required".into());
+    }
+
+    // Preserve safety/caps if the user set them.
+    let max_tokens = config_value("caps", "max_tokens_per_session").unwrap_or_else(|| "200000".into());
+    let max_cost = config_value("caps", "max_cost_usd").unwrap_or_else(|| "1.0".into());
+    let max_steps = config_value("caps", "max_steps").unwrap_or_else(|| "25".into());
+    let confirm = config_value("safety", "confirm_destructive").unwrap_or_else(|| "true".into());
+
+    let mut out = String::new();
+    out.push_str("# Slug configuration — managed by the dashboard.\n");
+    out.push_str("# API keys are read from the env var named below and are NEVER stored here.\n\n");
+    out.push_str(&format!("[brain]\nprovider = \"{slot}\"\n\n"));
+    out.push_str(&format!("[providers.{slot}]\n"));
+    if !key_env.trim().is_empty() {
+        out.push_str(&format!("api_key_env = \"{}\"\n", key_env.trim()));
+    }
+    if !base_url.trim().is_empty() {
+        out.push_str(&format!("base_url = \"{}\"\n", base_url.trim()));
+    }
+    out.push_str(&format!("model = \"{}\"\n\n", model.trim()));
+    out.push_str(&format!(
+        "[caps]\nmax_tokens_per_session = {max_tokens}\nmax_cost_usd = {max_cost}\nmax_steps = {max_steps}\n\n"
+    ));
+    out.push_str(&format!("[safety]\nconfirm_destructive = {confirm}\n"));
+
+    let path = config_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
+    }
+    std::fs::write(&path, out).map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(providers_status())
+}
+
+/// Whether an env var holds a (non-empty) value in this process.
+pub fn key_present(env: &str) -> bool {
+    std::env::var(env).map(|v| !v.trim().is_empty()).unwrap_or(false)
+}
+
 // ----------------------------- MCP server list -----------------------------
 
 fn load_servers() -> Vec<Value> {
@@ -183,6 +306,9 @@ pub fn remove_server(name: &str, self_url: &str) -> Result<Value, String> {
 mod tests {
     use super::*;
 
+    // These tests mutate the shared `SLUG_CONFIG` env var; serialize them.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn host_port_parsing() {
         assert_eq!(host_port("http://127.0.0.1:9000/mcp"), Some(("127.0.0.1".into(), 9000)));
@@ -193,6 +319,7 @@ mod tests {
 
     #[test]
     fn brain_info_defaults_when_no_config() {
+        let _g = ENV_LOCK.lock().unwrap();
         // With a config path that does not exist, we still return a sane default.
         std::env::set_var("SLUG_CONFIG", "/nonexistent/slug.toml");
         let (p, m) = brain_info();
@@ -203,6 +330,7 @@ mod tests {
 
     #[test]
     fn brain_info_reads_provider_and_model() {
+        let _g = ENV_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!("slugcfg{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = dir.join("slug.toml");
@@ -216,6 +344,39 @@ mod tests {
         assert_eq!(p, "ollama");
         assert_eq!(m, "qwen3:14b");
         assert!(provider_is_local(&p));
+        std::env::remove_var("SLUG_CONFIG");
+    }
+
+    #[test]
+    fn provider_catalog_covers_the_majors() {
+        let ids: Vec<&str> = provider_catalog().iter().map(|p| p.0).collect();
+        for must in ["anthropic", "gemini", "openrouter", "openai", "groq", "mistral", "deepseek", "xai", "ollama"] {
+            assert!(ids.contains(&must), "catalog missing {must}");
+        }
+    }
+
+    #[test]
+    fn set_provider_writes_config_without_keys() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("slugprov{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("slug.toml");
+        std::env::set_var("SLUG_CONFIG", &cfg);
+
+        // Activate Groq (rides the openai slot with a custom base_url).
+        set_provider("openai", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile").unwrap();
+        let written = std::fs::read_to_string(&cfg).unwrap();
+        assert!(written.contains("provider = \"openai\""));
+        assert!(written.contains("https://api.groq.com/openai/v1"));
+        assert!(written.contains("api_key_env = \"GROQ_API_KEY\""));
+        // The key VALUE must never be written, only the env var name.
+        assert!(!written.contains("sk-"), "a key value must never be stored");
+
+        let (p, m) = brain_info();
+        assert_eq!(p, "openai");
+        assert_eq!(m, "llama-3.3-70b-versatile");
+
+        assert!(set_provider("bogus", "", "", "x").is_err());
         std::env::remove_var("SLUG_CONFIG");
     }
 
