@@ -23,19 +23,27 @@ mod assumptions {
     pub const SHOT_H: f64 = 800.0;
     pub const IMG_TOKENS_PER_PX: f64 = 1.0 / 750.0;
 
-    // A vision agent re-reads the board by screenshot each turn: once to choose
-    // its move, once to read the opponent's reply. (Conservative; many agents
-    // also keep prior screenshots in context, which only widens the gap.)
-    pub const SHOTS_PER_TURN: f64 = 2.0;
-    // Small per-turn text (reasoning + tool JSON), same for both approaches.
-    pub const TEXT_TOKENS_PER_TURN: f64 = 200.0;
+    // ---- The FULL play loop for ONE move (not just perception) ----
+    // To play a chess move you pick up a piece and drop it = 2 actions.
+    pub const ACTIONS_PER_MOVE: f64 = 2.0;
+    // A vision agent must look at the board to choose its move (1 screenshot) AND,
+    // because computer-use returns a screenshot after every action to verify it,
+    // it takes one screenshot per click too. So shots/move = observe + actions.
+    pub const VISION_OBSERVE_SHOTS: f64 = 1.0;
+    pub const fn vision_shots_per_move() -> f64 {
+        VISION_OBSERVE_SHOTS + ACTIONS_PER_MOVE // = 3
+    }
+    // Slug plays a move with synthetic clicks; each returns a tiny text result
+    // ("ok: clicked at x,y") — no image, no perception. It reads the opponent's
+    // reply once via a filtered move-list snapshot (the board is an opaque canvas,
+    // so it never screenshots/snapshots to *act*).
+    pub const SLUG_CLICK_RESULT_TOKENS: f64 = 15.0;
+
+    // Small per-move text (reasoning + tool JSON), same for both approaches.
+    pub const TEXT_TOKENS_PER_MOVE: f64 = 200.0;
 
     // Rough, conventional text tokenization (~4 chars/token for English+markup).
     pub const CHARS_PER_TOKEN: f64 = 4.0;
-
-    // Published Claude Sonnet input price (USD per million input tokens). Image
-    // and text input tokens are billed at the same input rate.
-    pub const PRICE_PER_MTOK_USD: f64 = 3.0;
 
     // A typical game length (moves per side).
     pub const GAME_TURNS: usize = 40;
@@ -183,94 +191,89 @@ fn filtered_snapshot_is_orders_of_magnitude_smaller() {
     assert!(moves * 10 < full, "filtered ({moves}) should be <10% of full ({full})");
 }
 
+/// Tokens to play ONE full move with vision: observe the board + one verification
+/// screenshot per click + reasoning text.
+fn vision_tokens_per_move() -> f64 {
+    assumptions::vision_shots_per_move() * img_tokens() + assumptions::TEXT_TOKENS_PER_MOVE
+}
+
+/// Tokens to play ONE full move with Slug: 2 click results (tiny text) + one
+/// filtered move-list read of the current position + reasoning text. No images.
+fn slug_tokens_per_move(plies: usize) -> f64 {
+    let (_n, _full, moves_chars) = snapshot_sizes(plies);
+    assumptions::ACTIONS_PER_MOVE * assumptions::SLUG_CLICK_RESULT_TOKENS
+        + text_tokens(moves_chars)
+        + assumptions::TEXT_TOKENS_PER_MOVE
+}
+
 #[test]
-fn slug_uses_far_fewer_tokens_than_vision_over_a_game() {
-    // Vision: SHOTS_PER_TURN screenshots + text, every turn.
-    let vision_per_turn = assumptions::SHOTS_PER_TURN * img_tokens()
-        + assumptions::TEXT_TOKENS_PER_TURN;
-    let vision_game = vision_per_turn * assumptions::GAME_TURNS as f64;
+fn slug_plays_a_game_in_far_fewer_tokens_than_vision() {
+    let vision_game = vision_tokens_per_move() * assumptions::GAME_TURNS as f64;
+    let slug_game: f64 =
+        (1..=assumptions::GAME_TURNS).map(|t| slug_tokens_per_move(2 * t)).sum();
 
-    // Slug: one filtered move-list read per turn (grows with the game) + text.
-    // The board is a canvas, so moves are just clicks (≈no perception tokens).
-    let mut slug_game = 0.0;
-    let mut slug_naive_game = 0.0;
-    for turn in 1..=assumptions::GAME_TURNS {
-        let plies = 2 * turn;
-        let (_n, full_chars, moves_chars) = snapshot_sizes(plies);
-        slug_game += text_tokens(moves_chars) + assumptions::TEXT_TOKENS_PER_TURN;
-        slug_naive_game += text_tokens(full_chars) + assumptions::TEXT_TOKENS_PER_TURN;
-    }
-
-    // Filtered Slug is several times cheaper than vision.
+    // Counting the WHOLE play loop (clicking included), Slug plays the game in
+    // dramatically fewer tokens than a screenshot loop.
     assert!(
-        slug_game * 3.0 < vision_game,
-        "Slug filtered ({slug_game:.0}) should be >3x cheaper than vision ({vision_game:.0})"
-    );
-    // Honest caveat the codebase must keep true: a NAIVE full-snapshot-every-turn
-    // loop is actually *worse* than vision — which is exactly why the server-side
-    // filtering exists.
-    assert!(
-        slug_naive_game > vision_game,
-        "naive full-snapshot Slug ({slug_naive_game:.0}) is worse than vision ({vision_game:.0}) — filtering is what wins"
+        slug_game * 4.0 < vision_game,
+        "Slug ({slug_game:.0} tok) should be >4x cheaper than vision ({vision_game:.0} tok)"
     );
 }
 
-/// Not an assertion — prints the grounded comparison table.
+#[test]
+fn one_screenshot_costs_more_than_the_whole_move_list() {
+    let (_n, _full, moves_chars) = snapshot_sizes(2 * assumptions::GAME_TURNS);
+    assert!(
+        img_tokens() > text_tokens(moves_chars),
+        "one screenshot ({:.0} tok) should cost more than the full move list ({:.0} tok)",
+        img_tokens(),
+        text_tokens(moves_chars),
+    );
+}
+
+/// Not an assertion — prints the grounded, tokens-only comparison.
 /// `cargo test -p slug-core --test snapshot_vs_vision -- --nocapture report`
 #[test]
 fn report() {
     use assumptions::*;
 
     let img = img_tokens();
-    let vision_per_turn = SHOTS_PER_TURN * img + TEXT_TOKENS_PER_TURN;
 
-    let price = |toks: f64| toks / 1_000_000.0 * PRICE_PER_MTOK_USD;
-
-    println!("\n=== Playing chess.com: screenshot/vision vs Slug ===\n");
+    println!("\n=== Playing chess.com — full play loop, in TOKENS ===\n");
     println!("Assumptions (sourced):");
-    println!("  screenshot {}x{} → {:.0} image tokens  [(w*h)/750, Anthropic]",
+    println!("  screenshot {}x{} -> {:.0} image tokens   [(w*h)/750, Anthropic]",
              SHOT_W as u32, SHOT_H as u32, img);
-    println!("  {SHOTS_PER_TURN} screenshots/turn, {TEXT_TOKENS_PER_TURN:.0} text tokens/turn");
-    println!("  {CHARS_PER_TOKEN} chars/token; ${PRICE_PER_MTOK_USD}/Mtok input (Claude Sonnet)");
+    println!("  one move = {ACTIONS_PER_MOVE:.0} clicks (pick up + drop)");
+    println!("  vision: {:.0} screenshots/move (observe + 1 verify per click)",
+             vision_shots_per_move());
+    println!("  slug:   0 screenshots — clicks return ~{SLUG_CLICK_RESULT_TOKENS:.0} tok of text,");
+    println!("          + 1 filtered move-list read of the reply");
+    println!("  +{TEXT_TOKENS_PER_MOVE:.0} reasoning tok/move (both); {CHARS_PER_TOKEN:.0} chars/token");
     println!("  game length: {GAME_TURNS} moves/side\n");
 
-    println!("MEASURED snapshot sizes (this crate's serializer):");
+    println!("TOKENS TO PLAY ONE MOVE (clicking + reading the reply):");
     for &t in &[1usize, 10, 20, 40] {
-        let (nodes, full, moves) = snapshot_sizes(2 * t);
-        println!(
-            "  move {t:>2}: page = {nodes} nodes / {full} chars (~{:.0} tok) | \
-             move-list filter = {moves} chars (~{:.0} tok)",
-            text_tokens(full),
-            text_tokens(moves),
-        );
+        let v = vision_tokens_per_move();
+        let s = slug_tokens_per_move(2 * t);
+        println!("  move {t:>2}: vision {v:>7.0} tok   |   slug {s:>6.0} tok   ->  {:.0}x cheaper",
+                 v / s);
     }
 
-    // Per-turn at endgame (move 40, biggest move list).
-    let (_n, full_chars, moves_chars) = snapshot_sizes(2 * GAME_TURNS);
-    let slug_per_turn_end = text_tokens(moves_chars) + TEXT_TOKENS_PER_TURN;
-    let slug_naive_per_turn_end = text_tokens(full_chars) + TEXT_TOKENS_PER_TURN;
+    let vision_game = vision_tokens_per_move() * GAME_TURNS as f64;
+    let slug_game: f64 = (1..=GAME_TURNS).map(|t| slug_tokens_per_move(2 * t)).sum();
+    let slug_naive_game: f64 = (1..=GAME_TURNS)
+        .map(|t| {
+            let (_n, full, _m) = snapshot_sizes(2 * t);
+            ACTIONS_PER_MOVE * SLUG_CLICK_RESULT_TOKENS + text_tokens(full) + TEXT_TOKENS_PER_MOVE
+        })
+        .sum();
 
-    println!("\nPER-TURN input tokens (at move {GAME_TURNS}):");
-    println!("  vision (2 screenshots)       : {vision_per_turn:>8.0} tok");
-    println!("  slug, full snapshot (naive)  : {slug_naive_per_turn_end:>8.0} tok");
-    println!("  slug, filtered move list     : {slug_per_turn_end:>8.0} tok");
-
-    // Whole game.
-    let vision_game = vision_per_turn * GAME_TURNS as f64;
-    let mut slug_game = 0.0;
-    let mut slug_naive_game = 0.0;
-    for turn in 1..=GAME_TURNS {
-        let (_n, full, moves) = snapshot_sizes(2 * turn);
-        slug_game += text_tokens(moves) + TEXT_TOKENS_PER_TURN;
-        slug_naive_game += text_tokens(full) + TEXT_TOKENS_PER_TURN;
-    }
-
-    println!("\nWHOLE GAME ({GAME_TURNS} moves) input tokens & cost:");
-    println!("  vision                       : {vision_game:>9.0} tok   ${:.4}", price(vision_game));
-    println!("  slug, full snapshot (naive)  : {slug_naive_game:>9.0} tok   ${:.4}", price(slug_naive_game));
-    println!("  slug, filtered move list     : {slug_game:>9.0} tok   ${:.4}", price(slug_game));
-    println!("\n  → Slug (filtered) uses {:.0}x fewer input tokens than vision,",
+    println!("\nWHOLE GAME ({GAME_TURNS} moves) — total input tokens:");
+    println!("  vision (screenshot loop)     : {vision_game:>9.0} tok");
+    println!("  SLUG (filtered)              : {slug_game:>9.0} tok   ->  {:.0}x fewer than vision",
              vision_game / slug_game);
-    println!("    and {:.0}x fewer than even a naive full-snapshot Slug loop.\n",
-             slug_naive_game / slug_game);
+    println!("  one screenshot               : {img:>9.0} tok   (> the whole {:.0}-token move list)",
+             text_tokens(snapshot_sizes(2 * GAME_TURNS).2));
+    println!("\nfootnote: a NAIVE Slug that re-snapshots the whole page each move would cost");
+    println!("  {slug_naive_game:.0} tok (worse than vision) — which is why Slug filters by default.\n");
 }
