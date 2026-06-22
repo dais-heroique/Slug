@@ -28,14 +28,27 @@ cp "$BIN_DIR/slug-mcp" "$BIN_DIR/slug" "$BIN_DIR/slug-agent" "$APP/Contents/MacO
 # slug-agent) and open the dashboard.
 cat > "$APP/Contents/MacOS/Slug" <<'LAUNCHER'
 #!/bin/bash
+# Slug.app launcher: start the background service (if not already up) and open the
+# dashboard. Designed for a normal double-click — the service is detached so it
+# keeps running after this launcher exits.
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export SLUG_AGENT_BIN="$DIR/slug-agent"
 export RUST_LOG="${RUST_LOG:-slug_mcp=info,slug_brain=info,slug_bridge=info}"
+# Gate destructive actions behind dashboard approval by default.
+export SLUG_DESTRUCTIVE="${SLUG_DESTRUCTIVE:-ask}"
+# Honour a user config if one exists (e.g. from a prior install or hand-edit).
+[ -f "$HOME/.slug/slug.toml" ] && export SLUG_CONFIG="$HOME/.slug/slug.toml"
 LOG_DIR="$HOME/Library/Logs/slug"; mkdir -p "$LOG_DIR"
-# If a daemon is already up, just open the dashboard.
+# If a service is already up, just open the dashboard.
 if ! curl -s "http://127.0.0.1:7333/healthz" >/dev/null 2>&1; then
-  "$DIR/slug-mcp" --http 127.0.0.1:7333 >>"$LOG_DIR/slug-mcp.out.log" 2>>"$LOG_DIR/slug-mcp.err.log" &
-  sleep 1
+  nohup "$DIR/slug-mcp" --http 127.0.0.1:7333 \
+    >>"$LOG_DIR/slug-mcp.out.log" 2>>"$LOG_DIR/slug-mcp.err.log" &
+  disown 2>/dev/null || true
+  # Wait briefly so the dashboard isn't opened before the server is ready.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -s "http://127.0.0.1:7333/healthz" >/dev/null 2>&1 && break
+    sleep 0.3
+  done
 fi
 open "http://127.0.0.1:7333/dashboard"
 LAUNCHER

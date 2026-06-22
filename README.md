@@ -1,16 +1,22 @@
 # Slug
 
-**Slug** is an OS design whose primary user is an AI agent: instead of
-perceiving the screen through screenshots, the agent reads a mandatory, OS-wide
-**semantic UI layer** — a typed, delta-compressed representation of every widget.
-See [`docs/`](./docs) for the full design dossier.
+**Slug** is a lightweight **desktop app** that lets an AI agent control the
+applications on your computer **without ever looking at a screenshot**. Instead of
+sending pictures of your screen to a model that guesses where to click, Slug reads
+the operating system's built-in **accessibility layer** — the structured text
+description of every button, field and menu (the same data screen readers use) —
+and lets the agent act on those elements directly. The result is faster, cheaper
+and more reliable than vision-based "computer use".
 
-This repository implements the **semantic bus**: it harvests the OS accessibility
-tree and exposes it as an **MCP server**, so you can connect Claude Code (or any
-MCP client) and have it read and drive native apps — no pixels required. On top of
-the bus it adds a multi-provider agent loop (`slug-brain`), an MCP-native control
-dashboard, synthetic keyboard/mouse/scroll input, and one-click installers. The
-installable layer is **cross-platform**:
+It is **not** an operating system: it installs on top of your existing macOS,
+Windows or Linux like any other app (a `.dmg`, an `.exe` installer, or a tarball).
+Under the hood it exposes the accessibility layer as an **MCP server**, so you can
+connect Claude Code (or any MCP client) and have it read and drive native apps; it
+also bundles a multi-provider agent loop (`slug-brain`), a built-in control
+dashboard, and synthetic keyboard/mouse/scroll input. (The longer-term design
+vision behind this approach is in [`docs/`](./docs).)
+
+Slug runs on all three desktops; only the perception/action layer differs per OS:
 
 | OS | Accessibility source | Permissions |
 |----|----------------------|-------------|
@@ -22,9 +28,9 @@ Only the platform perception/action layer (`slug-bridge`) differs per OS; the
 semantic model (`slug-core`), the MCP server (`slug-mcp`), and the agent
 (`slug-brain`) are identical everywhere. See [Platform backends](#platform-backends).
 
-> Milestone 1 lives on the accessibility path, not the Wayland compositor. Two
-> documented step-1 adaptations of the canonical spec apply (see
-> [Milestone-1 adaptations](#milestone-1-adaptations)).
+> Slug works through the OS accessibility APIs (AT-SPI2 / UI Automation / AX), not
+> a custom compositor. Two documented adaptations of the original design spec apply
+> (see [Design adaptations](#milestone-1-adaptations)).
 
 ## Workspace layout
 
@@ -105,13 +111,45 @@ in [CI](.github/workflows/ci.yml) on `windows-latest` / `macos-latest`.
   missing, returns a typed error with these instructions (it never panics).
 - **Good first targets:** TextEdit, Finder, Safari.
 
-## Install
+## Install the app
 
-The easiest path is a **release download** — a drag-to-install **`.dmg`** (or
-zipped **Slug.app**) on macOS, a one-click **`SlugSetup.exe`** installer (or a zip
-+ `install.ps1`) on Windows, a tarball on Linux — see **[INSTALL.md](./INSTALL.md)**
-for downloads, permissions, and the AI-provider setup on every OS. To build it
-yourself instead:
+Download the file for your system from the repository's **Releases** page and
+install it like any normal app. Full details (provider setup, troubleshooting) are
+in **[INSTALL.md](./INSTALL.md)**.
+
+### macOS — `.dmg`
+1. Download **`Slug-<ver>-macos-arm64.dmg`** (Apple Silicon) or
+   **`…-macos-x86_64.dmg`** (Intel).
+2. Open the `.dmg` and **drag `Slug.app` onto the Applications folder**.
+3. First launch: right-click **Slug → Open → Open** (the build is unsigned unless
+   you supply signing certs — see [INSTALL.md](./INSTALL.md)). Or clear the
+   quarantine once in Terminal: `xattr -dr com.apple.quarantine /Applications/Slug.app`.
+4. **Double-click Slug** — it starts the background service and opens the dashboard
+   at <http://127.0.0.1:7333/dashboard>.
+5. Grant permissions once, then relaunch Slug: **System Settings → Privacy &
+   Security → Accessibility** (add Slug, toggle on) and, for synthetic
+   typing/clicking, **Input Monitoring** too. (Slug never records the screen, so
+   Screen Recording is not needed.)
+
+### Windows — `.exe`
+1. Download **`SlugSetup-<ver>-windows-x86_64.exe`**.
+2. Run it (per-user, **no admin needed**). It installs Slug, starts the background
+   service, registers it to run at sign-in, and offers to open the dashboard.
+3. Open <http://127.0.0.1:7333/dashboard>. No extra OS permission is required.
+   Uninstall from **Apps & features** like any program.
+
+### Linux — tarball
+```sh
+tar -xzf slug-*-linux-x86_64.tar.gz && cd slug-*-linux-x86_64
+gsettings set org.gnome.desktop.interface toolkit-accessibility true   # expose trees
+SLUG_AGENT_BIN="$PWD/slug-agent" ./slug-mcp --http 127.0.0.1:7333       # then open the dashboard
+```
+For synthetic input also `sudo apt install xdotool` (or `ydotool` on Wayland).
+
+> **Connecting an AI** to drive Slug (e.g. Claude Code over MCP) is optional and
+> covered in [Connect Claude Code](#connect-claude-code) and [INSTALL.md](./INSTALL.md).
+
+To build the app yourself instead of downloading it:
 
 ## Build
 
@@ -127,6 +165,29 @@ Run the tests (unit + MCP protocol integration tests; no desktop needed):
 
 ```sh
 cargo test --workspace
+```
+
+### Build the installers (`.dmg` / `.exe`)
+
+The release artifacts are produced by CI ([`.github/workflows/release.yml`](.github/workflows/release.yml))
+— push a tag like `v0.1.0`, or run the workflow manually (**Actions → Release →
+Run workflow**) to get the `.dmg`, `SlugSetup.exe`, and tarballs as downloads. To
+build them by hand:
+
+```sh
+# macOS: app bundle + drag-to-install disk image (run on macOS)
+cargo build --release -p slug-mcp -p slug-cli -p slug-brain
+bash slug-install/make-macos-app.sh target/release dist     # -> dist/Slug.app
+bash slug-install/make-macos-dmg.sh dist/Slug.app dist/Slug.dmg
+# (optional signing/notarization: set SIGN_IDENTITY and AC_PROFILE first)
+
+# Windows: one-click installer (run on Windows, needs Inno Setup's ISCC.exe)
+cargo build --release -p slug-mcp -p slug-cli -p slug-brain
+mkdir slug-install\windows\payload
+copy target\release\slug-mcp.exe slug-install\windows\payload\
+copy target\release\slug.exe slug-install\windows\payload\
+copy target\release\slug-agent.exe slug-install\windows\payload\
+iscc /DMyAppVersion=0.1.0 slug-install\windows\slug.iss      # -> dist\SlugSetup.exe
 ```
 
 ## Run the MCP server
@@ -480,19 +541,23 @@ must never be reachable from a web page in your browser. It binds **loopback onl
 (CSRF) and DNS-rebinding attacks. Local CLI clients (Claude Code, `curl`) send no
 `Origin` and a local `Host`, so they pass unchanged.
 
-## Install (macOS)
+## Install from source (developer / launchd service)
+
+If you built from source instead of downloading the app, this installs Slug as a
+background service without the `.app`/`.exe` packaging:
 
 ```sh
-./slug-install/install.sh
+./slug-install/install.sh           # macOS: ~/.slug + launchd agent at login
+./slug-install/install.sh uninstall
 ```
 
 Builds the Rust binaries (a few MB — **no models are downloaded**), writes a
 starter `~/.slug/slug.toml` (defaulting to `ollama` if detected, else `claude`),
 and registers a launchd agent that runs `slug-mcp --http` at login with the
-dashboard (and sets `SLUG_DESTRUCTIVE=ask`). Windows has a one-click installer
-(`SlugSetup.exe`) and `install.ps1`; Linux runs the daemon directly or via a
-systemd `--user` unit. See [INSTALL.md](./INSTALL.md) and
-[`slug-install/README.md`](./slug-install/README.md).
+dashboard (and sets `SLUG_DESTRUCTIVE=ask`). On Windows use
+`powershell -ExecutionPolicy Bypass -File .\slug-install\install.ps1`; on Linux run
+the daemon directly or via a systemd `--user` unit. See [INSTALL.md](./INSTALL.md)
+and [`slug-install/README.md`](./slug-install/README.md).
 
 ## Milestone-1 adaptations
 
