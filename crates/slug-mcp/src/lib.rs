@@ -10,6 +10,7 @@
 
 pub mod agent;
 pub mod approval;
+pub mod dashboard_api;
 pub mod mcp;
 pub mod server;
 pub mod session;

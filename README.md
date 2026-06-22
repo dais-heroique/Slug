@@ -1,5 +1,7 @@
 # Slug
 
+> Created by **Thibault Dufour**.
+
 **Slug** is a lightweight **desktop app** that lets an AI agent control the
 applications on your computer **without ever looking at a screenshot**. Instead of
 sending pictures of your screen to a model that guesses where to click, Slug reads
@@ -518,31 +520,34 @@ a network or a bus.
 
 ## MCP-native control dashboard
 
-A human can supervise and drive the agent through the **same MCP transport** — no
-separate protocol. `slug-mcp` exposes agent-control tools (`slug_agent_start_task`,
-`slug_agent_status`, `slug_agent_pause`, `slug_agent_resume`, `slug_agent_stop`),
-and serves a tiny static dashboard at **`GET /dashboard`** (when run with
-`--http`). It is a single self-contained HTML/JS file (no framework) laid out in
-three columns — **agent control** (task box, start/pause/resume/stop, live
-provider/tier/model badge, connection indicators, and metric tiles for
-steps/elapsed/tokens/cost), **semantic tree** (role-coloured, clickable `ref`
-chips, state pills, a filter box, scope selector), and a split right column with
-the **activity log** (reasoning/result lines, errors in red) over a **running-apps**
-panel. A red **approvals banner** appears above all three when a destructive action
-is awaiting human approval, with Approve/Deny buttons. It:
+A human supervises and drives everything from a **built-in dark dashboard** —
+served by `slug-mcp` over the same transport, opened as its **own app window**
+(Chrome/Edge `--app`) by the packaged app so it feels native, not like a browser
+tab. It is one self-contained HTML/JS file (no framework). Top bar shows, at a
+glance, **which brain is connected** — *Claude* (cloud) or a *local model* (Ollama)
+with the model name — whether an **MCP client is connected**, and the **MCP server
+count**. Below:
 
-- polls `slug_agent_status` (≈1 s while a task runs, throttled to 3 s when idle, and
-  paused entirely when the browser tab is hidden — low latency, low overhead);
-- polls `GET /approvals` and lets a human approve/deny gated destructive actions;
-- renders the live semantic tree from `slug_snapshot` **as text** — the exact
-  hierarchy the agent reads;
-- has a text box that calls `slug_agent_start_task`.
+- **Agent** — brain card, metric tiles (steps / elapsed / tokens / cost), the task
+  box, and start / pause / resume / stop. Full control of the agent.
+- **Semantic view** — the live tree from `slug_snapshot` rendered **as text**
+  (role-coloured, `ref` chips, state pills, `@x,y`), with a filter box and scope
+  selector.
+- **Tabs** — **Activity** (reasoning/result log, errors in red), **MCP** (every
+  connected MCP server with live reachability, and a form to **add your own custom
+  MCP servers** — persisted to `~/.slug/mcp_servers.json`), and **Apps** (running
+  accessible apps).
+- A red **approvals banner** appears on top when a destructive action awaits your
+  approval, with Approve / Deny buttons.
 
-Its header states, verbatim: *“Slug never captures pixels. Everything below is the
-same structured text the agent reads.”*
+Backing HTTP endpoints (all loopback-gated): `GET /info` (app/brain/client),
+`GET /mcp-servers` + `POST`/`DELETE` (manage MCP servers), `GET /approvals` +
+`POST /approve`, and the agent-control tools over `POST /mcp`. The center panel
+states, verbatim: *“Slug never captures pixels … the same structured text the agent
+reads.”*
 
 ```sh
-slug-mcp --http 127.0.0.1:7333      # then open http://127.0.0.1:7333/dashboard
+slug-mcp --http 127.0.0.1:7333      # the packaged app opens it for you, as a window
 ```
 
 To avoid a crate cycle (`slug-brain` depends on `slug-mcp`), the controller drives
@@ -593,6 +598,10 @@ documented deviations (and stub one security feature):
 3. **Capability token** (§5.4) is **stubbed** — security is Milestone 5
    (see [`docs/RISK-REGISTER.md`](./docs/RISK-REGISTER.md)). The gate is wired
    through `SlugDocument::snapshot` so only the validation body changes later.
+
+## Author
+
+**Slug** is created and maintained by **Thibault Dufour**.
 
 ## License
 

@@ -77,11 +77,25 @@ pub async fn run_http(
     use axum::response::{Html, IntoResponse};
     use axum::routing::{get, post};
     use axum::{Json, Router};
+    use serde_json::Value;
+
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[derive(Clone)]
     struct AppState {
         session: Arc<Session>,
         control: Arc<AgentController>,
+        port: u16,
+        /// Unix-seconds of the last MCP client request (0 = never) — powers the
+        /// "an MCP client is connected" indicator on the dashboard.
+        last_seen: Arc<AtomicU64>,
+    }
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
     }
 
     async fn mcp_endpoint(
@@ -89,6 +103,8 @@ pub async fn run_http(
         headers: axum::http::HeaderMap,
         body: axum::body::Bytes,
     ) -> axum::response::Response {
+        // Record that a real MCP client just talked to us (for the dashboard).
+        state.last_seen.store(now_secs(), Ordering::Relaxed);
         // Security: this localhost server can read screen content and drive the
         // desktop, so it must not be reachable from a web page in the user's
         // browser (DNS-rebinding / CSRF). Reject any request whose Origin or Host
@@ -162,6 +178,79 @@ pub async fn run_http(
         }
     }
 
+    /// Dashboard header info: app version, configured brain (Claude vs local),
+    /// transport, and whether an MCP client is currently connected.
+    async fn info(State(state): State<AppState>, headers: axum::http::HeaderMap) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let (provider, model) = crate::dashboard_api::brain_info();
+        let local = crate::dashboard_api::provider_is_local(&provider);
+        let last = state.last_seen.load(Ordering::Relaxed);
+        let age = now_secs().saturating_sub(last);
+        Json(serde_json::json!({
+            "app": "Slug",
+            "version": env!("CARGO_PKG_VERSION"),
+            "transport": "http",
+            "port": state.port,
+            "brain": {
+                "provider": provider,
+                "model": model,
+                "location": if local { "local" } else { "cloud" },
+            },
+            "client": {
+                "connected": last != 0 && age < 60,
+                "last_seen_s": if last == 0 { Value::Null } else { Value::from(age) },
+            },
+        }))
+        .into_response()
+    }
+
+    fn self_url(port: u16) -> String {
+        format!("http://127.0.0.1:{port}/mcp")
+    }
+
+    /// List MCP servers (this app + user-added) with live reachability.
+    async fn mcp_servers_list(State(state): State<AppState>, headers: axum::http::HeaderMap) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        Json(crate::dashboard_api::list_servers(&self_url(state.port))).into_response()
+    }
+
+    /// Add a custom MCP server. Body: `{ "name": "...", "url": "http://host:port/mcp" }`.
+    async fn mcp_servers_add(
+        State(state): State<AppState>,
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let name = body.get("name").and_then(Value::as_str).unwrap_or("");
+        let url = body.get("url").and_then(Value::as_str).unwrap_or("");
+        match crate::dashboard_api::add_server(name, url, &self_url(state.port)) {
+            Ok(list) => Json(list).into_response(),
+            Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
+        }
+    }
+
+    /// Remove a custom MCP server. Body: `{ "name": "..." }`.
+    async fn mcp_servers_remove(
+        State(state): State<AppState>,
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let name = body.get("name").and_then(Value::as_str).unwrap_or("");
+        match crate::dashboard_api::remove_server(name, &self_url(state.port)) {
+            Ok(list) => Json(list).into_response(),
+            Err(e) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": e }))).into_response(),
+        }
+    }
+
     /// Accept a request only if it is local: any present `Origin` and `Host`
     /// header must point at loopback. This blocks cross-site / DNS-rebinding
     /// attacks while leaving local CLI clients (no Origin) untouched.
@@ -198,10 +287,17 @@ pub async fn run_http(
     let app = Router::new()
         .route("/mcp", post(mcp_endpoint))
         .route("/dashboard", get(dashboard))
+        .route("/info", get(info))
         .route("/approvals", get(list_approvals))
         .route("/approve", post(decide_approval))
+        .route("/mcp-servers", get(mcp_servers_list).post(mcp_servers_add).delete(mcp_servers_remove))
         .route("/healthz", get(|| async { "ok" }))
-        .with_state(AppState { session, control });
+        .with_state(AppState {
+            session,
+            control,
+            port: addr.port(),
+            last_seen: Arc::new(AtomicU64::new(0)),
+        });
 
     info!(%addr, "slug-mcp listening on streamable HTTP at POST /mcp (dashboard at GET /dashboard)");
     let listener = tokio::net::TcpListener::bind(addr).await?;

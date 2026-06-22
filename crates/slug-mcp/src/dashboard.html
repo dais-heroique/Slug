@@ -3,343 +3,399 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Slug — Control Dashboard</title>
+<title>Slug</title>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg:#0d1117; --panel:#161b22; --panel2:#0d1117; --line:#30363d;
-    --fg:#c9d1d9; --muted:#8b949e; --accent:#58a6ff;
-    --green:#3fb950; --green-d:#238636; --yellow:#d29922; --red:#f85149; --chip:#21262d;
-    --role-window:#a371f7; --role-button:#58a6ff; --role-entry:#3fb950;
-    --role-check:#d29922; --role-text:#8b949e; --role-link:#79c0ff; --role-menu:#ff7b72;
+  :root{
+    --bg:#08080b; --bg2:#0d0d12; --panel:#131319; --panel2:#0f0f15; --line:#23232d;
+    --line2:#2e2e3a; --fg:#e7e7ee; --muted:#9a9aab; --dim:#6b6b7b;
+    --accent:#7c9cff; --accent2:#a78bfa; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
+    --chip:#1a1a22;
   }
-  * { box-sizing:border-box; }
-  body { margin:0; height:100vh; display:flex; flex-direction:column;
-         font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:var(--bg); color:var(--fg); }
-  header { padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto; }
-  header .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-  header h1 { margin:0; font-size:15px; font-weight:700; }
-  .banner { color:var(--accent); font-weight:600; margin-top:3px; font-size:12px; }
-  .conn { margin-left:auto; display:flex; align-items:center; gap:14px; font-size:12px; color:var(--muted); }
-  .hb { display:flex; align-items:center; gap:6px; }
-  .dot { width:9px; height:9px; border-radius:50%; background:var(--red); box-shadow:0 0 6px var(--red); }
-  .dot.ok { background:var(--green); box-shadow:0 0 6px var(--green); }
-
-  main { flex:1 1 auto; display:grid; grid-template-columns:320px 1fr 340px; min-height:0; }
-  .col { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--line); }
-  .col:last-child { border-right:0; }
-  .col h2 { margin:0; padding:8px 12px; font-size:11px; text-transform:uppercase; letter-spacing:.06em;
-            color:var(--muted); background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto;
-            display:flex; align-items:center; gap:8px; }
-  .col .body { flex:1 1 auto; overflow:auto; padding:10px 12px; }
-
-  .pill { display:inline-block; padding:1px 9px; border-radius:11px; background:var(--chip);
-          border:1px solid var(--line); font-size:11px; white-space:nowrap; }
-  .pill.running{color:var(--green);border-color:var(--green-d)} .pill.paused{color:var(--yellow);border-color:#9e6a03}
-  .pill.stopped,.pill.error{color:var(--red);border-color:#b62324} .pill.done,.pill.idle{color:var(--accent)}
-
-  /* metric tiles */
-  .tiles { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-  .tile { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
-  .tile .k { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
-  .tile .v { font-size:18px; font-weight:700; margin-top:2px; }
-  .tile.wide { grid-column:1/-1; }
-  .kv { font-size:11px; color:var(--muted); } .kv b { color:var(--fg); font-weight:600; }
-  textarea { width:100%; min-height:64px; resize:vertical; padding:8px 10px; background:var(--panel2);
-             color:var(--fg); border:1px solid var(--line); border-radius:6px; font:inherit; }
-  .btns { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
-  button { padding:8px 12px; background:var(--green-d); color:#fff; border:0; border-radius:6px; font:inherit; cursor:pointer; transition:opacity .12s; }
-  button.ghost { background:var(--chip); color:var(--fg); border:1px solid var(--line); }
-  button.start { grid-column:1/-1; } button:disabled { opacity:.35; cursor:not-allowed; }
-
-  .toolbar { display:flex; align-items:center; gap:8px; margin-left:auto; font-size:11px; }
-  select,input.f { background:var(--panel2); color:var(--fg); border:1px solid var(--line); border-radius:5px; font:inherit; padding:2px 6px; }
-  .approvals { background:#3d1d1d; border-bottom:1px solid #f85149; padding:8px 16px; display:flex; flex-direction:column; gap:6px; flex:0 0 auto; }
-  .approvals .hdr { color:#ff7b72; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
-  .approvals .ap { display:flex; align-items:center; gap:10px; font-size:13px; }
-  .approvals .ap .txt { flex:1; color:#ffd7d5; word-break:break-word; }
-  .approvals .ap .age { color:var(--muted); font-size:11px; }
-  .approvals button { font:inherit; border:1px solid var(--line); border-radius:5px; padding:3px 12px; cursor:pointer; }
-  .approvals .ok { background:#1f6f3f; color:#fff; border-color:#2ea043; }
-  .approvals .no { background:#6f1f1f; color:#fff; border-color:#f85149; }
-  input.f { width:120px; }
-  .tree { white-space:pre; }
-  .role { font-weight:700; }
-  .role.window{color:var(--role-window)} .role.button{color:var(--role-button)} .role.entry{color:var(--role-entry)}
-  .role.checkbox{color:var(--role-check)} .role.text{color:var(--role-text)} .role.link{color:var(--role-link)} .role.menu{color:var(--role-menu)}
-  .name { color:var(--fg); } .coord { color:var(--yellow); }
-  .ref { display:inline-block; padding:0 6px; margin-left:4px; border-radius:9px; cursor:pointer; background:var(--chip); border:1px solid var(--line); color:var(--accent); font-size:11px; }
-  .ref:hover{border-color:var(--accent)} .ref.copied{color:var(--green);border-color:var(--green-d)}
-  .st { display:inline-block; padding:0 6px; margin-left:4px; border-radius:9px; font-size:10px; background:#1c2128; border:1px solid var(--line); color:var(--muted); }
-  .st.focused{color:var(--accent);border-color:#1f6feb} .st.checked,.st.selected,.st.expanded{color:var(--green);border-color:var(--green-d)} .st.disabled{color:var(--muted)}
-  .opaque { margin-top:12px; padding:8px 10px; border:1px dashed var(--line); border-radius:6px; color:var(--yellow); font-size:11px; white-space:pre-wrap; }
-  .hidden { display:none; }
-
-  .log .row { padding:4px 0; border-bottom:1px solid #1c2128; display:flex; gap:8px; align-items:baseline; }
-  .log .ts { color:var(--muted); font-size:10px; flex:0 0 auto; min-width:30px; }
-  .log .msg { flex:1 1 auto; word-break:break-word; }
-  .log .row.err .msg{color:var(--red)} .log .row.done .msg{color:var(--green)} .log .row.head .msg{color:var(--accent)}
-  .apps div { padding:2px 0; border-bottom:1px solid #161b22; color:var(--muted); }
-  .empty { color:var(--muted); font-style:italic; }
-  .split { display:flex; flex-direction:column; min-height:0; height:100%; }
-  .split .top { flex:2 1 0; min-height:0; display:flex; flex-direction:column; }
-  .split .bot { flex:1 1 0; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--line); }
-
-  @media (max-width:980px){ main{grid-template-columns:1fr; grid-auto-rows:minmax(160px,auto)} .col{border-right:0;border-bottom:1px solid var(--line)} }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:radial-gradient(1200px 600px at 80% -10%, #15151f 0%, var(--bg) 60%);
+    color:var(--fg); font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    display:flex; flex-direction:column; height:100vh; overflow:hidden;
+  }
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Cascadia Code",monospace}
+  /* ---- approvals banner ---- */
+  .approvals{background:linear-gradient(90deg,#2a0f12,#1a0c10); border-bottom:1px solid var(--bad);
+    padding:10px 16px; display:flex; flex-direction:column; gap:8px; flex:0 0 auto}
+  .approvals .hdr{color:#ff9b93; font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase}
+  .approvals .ap{display:flex; align-items:center; gap:10px; font-size:13px}
+  .approvals .ap .txt{flex:1; color:#ffd9d5; word-break:break-word}
+  .approvals .ap .age{color:var(--dim); font-size:11px}
+  /* ---- top bar ---- */
+  header.topbar{flex:0 0 auto; display:flex; align-items:center; gap:14px; padding:11px 16px;
+    background:linear-gradient(180deg,#101018,#0c0c12); border-bottom:1px solid var(--line)}
+  .brand{display:flex; align-items:center; gap:9px; font-weight:700; letter-spacing:.2px}
+  .brand .logo{font-size:18px}
+  .brand .ver{color:var(--dim); font-weight:500; font-size:11px}
+  .pills{display:flex; align-items:center; gap:8px; margin-left:6px; flex-wrap:wrap}
+  .pill{display:inline-flex; align-items:center; gap:7px; background:var(--chip);
+    border:1px solid var(--line2); border-radius:999px; padding:4px 11px; font-size:12px; color:var(--fg)}
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .dot.ok{background:var(--ok);box-shadow:0 0 8px 0 var(--ok)} .dot.bad{background:var(--bad)}
+  .dot.warn{background:var(--warn)} .pill b{font-weight:600}
+  .pill .k{color:var(--muted)}
+  .spacer{flex:1}
+  /* ---- layout ---- */
+  main.grid{flex:1; display:grid; grid-template-columns:320px 1fr 360px; gap:12px; padding:12px; min-height:0}
+  .col{background:var(--panel); border:1px solid var(--line); border-radius:12px; display:flex;
+    flex-direction:column; min-height:0; overflow:hidden}
+  .col > h2{margin:0; font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted);
+    padding:11px 14px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px}
+  .body{padding:12px 14px; overflow:auto; min-height:0}
+  .body.tight{padding:10px}
+  /* ---- agent column ---- */
+  .card{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px}
+  .brainline{display:flex; align-items:center; gap:10px}
+  .brainbadge{font-size:22px}
+  .brainmeta{line-height:1.25}
+  .brainmeta .name{font-weight:700} .brainmeta .sub{color:var(--muted); font-size:12px}
+  .metrics{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0}
+  .tile{background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:9px 11px}
+  .tile .k{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.04em}
+  .tile .v{font-size:18px; font-weight:700; margin-top:2px}
+  .tile.wide{grid-column:1/-1}
+  textarea{width:100%; min-height:74px; resize:vertical; padding:10px; background:var(--bg2);
+    color:var(--fg); border:1px solid var(--line2); border-radius:9px; font:inherit; outline:none}
+  textarea:focus,input:focus,select:focus{border-color:var(--accent)}
+  .btns{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px}
+  button{font:inherit; cursor:pointer; border-radius:9px; border:1px solid var(--line2);
+    background:var(--chip); color:var(--fg); padding:9px 12px; transition:.12s}
+  button:hover{border-color:var(--accent); background:#1d1d27}
+  button.primary{background:linear-gradient(180deg,#3b5bdb,#2f49b8); border-color:#4661e0; color:#fff; font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  button.ghost{background:transparent}
+  button.span{grid-column:1/-1}
+  .statuspill{margin-left:auto; font-size:11px; padding:3px 10px; border-radius:999px; text-transform:uppercase; letter-spacing:.05em}
+  .s-idle{background:#1a1a22;color:var(--muted)} .s-running{background:#0e2a1c;color:var(--ok)}
+  .s-paused{background:#2a230e;color:var(--warn)} .s-done{background:#102338;color:var(--accent)}
+  .s-stopped,.s-error{background:#2a0f12;color:var(--bad)}
+  /* ---- tree ---- */
+  .toolbar{display:flex; gap:8px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--line)}
+  input.f,select{background:var(--bg2); color:var(--fg); border:1px solid var(--line2); border-radius:7px;
+    font:inherit; padding:5px 9px; outline:none}
+  input.f{flex:1}
+  .tree{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; white-space:pre; line-height:1.55}
+  .tree .role{color:var(--accent2)} .tree .nm{color:var(--fg)} .tree .ref{color:var(--ok)}
+  .tree .st{color:var(--warn)} .tree .xy{color:var(--accent)} .tree .cmt{color:var(--dim)}
+  .empty{color:var(--dim); font-style:italic; padding:8px}
+  .kv{color:var(--dim); font-size:11px; margin-left:auto}
+  /* ---- tabs (side col) ---- */
+  .tabs{display:flex; gap:4px; padding:8px 10px; border-bottom:1px solid var(--line)}
+  .tab{padding:5px 11px; border-radius:8px; font-size:12px; color:var(--muted); border:1px solid transparent; cursor:pointer}
+  .tab.active{background:var(--chip); color:var(--fg); border-color:var(--line2)}
+  .tab .badge{display:inline-block; min-width:16px; text-align:center; margin-left:6px; padding:0 5px;
+    border-radius:999px; background:#23232d; color:var(--muted); font-size:10px}
+  .pane{display:none; flex:1; min-height:0} .pane.active{display:flex; flex-direction:column}
+  /* ---- log ---- */
+  .log{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:1.5}
+  .log .line{padding:2px 0; border-bottom:1px solid #17171f; word-break:break-word}
+  .log .err{color:var(--bad)}
+  /* ---- mcp ---- */
+  .mcp-item{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid #17171f}
+  .mcp-item .nm{font-weight:600}
+  .mcp-item .url{color:var(--dim); font-size:11px} .mcp-item.mono .url{font-family:ui-monospace,monospace}
+  .mcp-item .x{margin-left:auto; color:var(--dim); border:none; background:none; padding:4px 8px}
+  .mcp-item .x:hover{color:var(--bad)}
+  .stat{font-size:11px; padding:2px 8px; border-radius:999px}
+  .stat.self{background:#102338;color:var(--accent)} .stat.reachable{background:#0e2a1c;color:var(--ok)}
+  .stat.unreachable{background:#2a0f12;color:var(--bad)} .stat.command{background:#23232d;color:var(--muted)}
+  .addform{display:grid; grid-template-columns:1fr; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line)}
+  .addform .row{display:flex; gap:8px} .addform input{flex:1}
+  /* ---- apps ---- */
+  .app-item{padding:7px 0; border-bottom:1px solid #17171f; display:flex; gap:8px; align-items:center}
+  .app-item .nm{font-weight:600} .app-item .bus{color:var(--dim); font-size:11px; margin-left:auto}
+  .note{color:var(--dim); font-size:11px; padding:8px 14px; border-top:1px solid var(--line)}
+  ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:#23232d;border-radius:8px}
 </style>
 </head>
 <body>
-<header>
-  <div class="top">
-    <h1>🐌 Slug — Control Dashboard</h1>
-    <span class="conn">
-      <span class="hb"><span id="dotMcp" class="dot"></span><span id="connMcp">MCP…</span></span>
-      <span class="hb"><span id="dotBus" class="dot"></span><span id="connBus">perception…</span></span>
-    </span>
-  </div>
-  <div class="banner">Slug never captures pixels. Everything below is the same structured text the agent reads.</div>
-</header>
 
 <div id="approvals" class="approvals" hidden></div>
 
-<main>
-  <!-- LEFT: agent -->
-  <div class="col">
-    <h2>Agent <span id="statusPill" class="pill idle" style="margin-left:auto">idle</span></h2>
+<header class="topbar">
+  <div class="brand"><span class="logo">🐌</span> Slug <span class="ver" id="ver"></span>
+    <span class="ver" style="margin-left:8px">· by Thibault Dufour</span></div>
+  <div class="pills">
+    <span class="pill" id="brainPill"><span class="dot" id="brainDot"></span><span class="k">brain</span> <b id="brainName">…</b></span>
+    <span class="pill" id="clientPill"><span class="dot" id="clientDot"></span><b id="clientTxt">no client</b></span>
+    <span class="pill" id="mcpPill"><span class="dot" id="mcpDot"></span><span class="k">MCP</span> <b id="mcpCount">0</b></span>
+  </div>
+  <div class="spacer"></div>
+  <span class="pill"><span class="dot" id="busDot"></span><b id="busTxt">perception</b></span>
+</header>
+
+<main class="grid">
+  <!-- LEFT: agent control -->
+  <section class="col">
+    <h2>Agent <span class="statuspill s-idle" id="statusPill">idle</span></h2>
     <div class="body">
-      <div class="tiles">
+      <div class="card">
+        <div class="brainline">
+          <span class="brainbadge" id="brainEmoji">🧠</span>
+          <div class="brainmeta"><div class="name" id="brainName2">—</div><div class="sub" id="brainSub">—</div></div>
+        </div>
+      </div>
+      <div class="metrics">
         <div class="tile"><div class="k">steps</div><div class="v" id="mSteps">0</div></div>
         <div class="tile"><div class="k">elapsed</div><div class="v" id="mElapsed">–</div></div>
         <div class="tile"><div class="k">tokens</div><div class="v" id="mTokens">0</div></div>
-        <div class="tile"><div class="k">cost (USD)</div><div class="v" id="mCost">$0.00</div></div>
-        <div class="tile wide"><div class="k">brain</div><div class="v" id="mBrain" style="font-size:13px">—</div></div>
+        <div class="tile"><div class="k">cost</div><div class="v" id="mCost">$0.00</div></div>
+        <div class="tile wide"><div class="k">task</div><div class="v" id="mTask" style="font-size:13px;font-weight:500;word-break:break-word">—</div></div>
       </div>
-      <div class="kv" style="margin-bottom:4px">task</div>
-      <div id="mTask" style="margin-bottom:12px; color:var(--fg); word-break:break-word">—</div>
-      <textarea id="taskInput" placeholder="Describe a task, e.g. 'Open Canva in Safari, create a design, pick the Logo template'"></textarea>
+      <textarea id="taskInput" placeholder="Tell Slug what to do, e.g. 'Open Safari on chess.com and play 1.e4'…"></textarea>
       <div class="btns">
-        <button id="bStart" class="start" onclick="startTask()">▶ Start task</button>
-        <button id="bPause" class="ghost" onclick="ctl('slug_agent_pause')">⏸ Pause</button>
-        <button id="bResume" class="ghost" onclick="ctl('slug_agent_resume')">▶ Resume</button>
-        <button id="bStop" class="ghost" onclick="ctl('slug_agent_stop')" style="grid-column:1/-1">■ Stop</button>
+        <button class="primary span" onclick="startTask()">▶ Start task</button>
+        <button class="ghost" onclick="ctl('slug_agent_pause')">⏸ Pause</button>
+        <button class="ghost" onclick="ctl('slug_agent_resume')">▶ Resume</button>
+        <button class="ghost span" onclick="ctl('slug_agent_stop')">■ Stop</button>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- CENTER: tree -->
-  <div class="col">
-    <h2>Semantic tree — text, never a screenshot
-      <span class="toolbar">
-        <input id="filter" class="f" placeholder="filter…" oninput="applyFilter()" />
-        <select id="scope" onchange="refreshTree(true)">
-          <option value="focused" selected>focused</option>
-          <option value="window">window</option>
-          <option value="desktop">desktop</option>
-        </select>
-        <span id="treeStats" class="kv"></span><span id="treeAge" class="kv"></span>
-      </span>
-    </h2>
-    <div class="body"><div id="tree" class="tree empty">loading…</div><div id="opaque"></div></div>
-  </div>
+  <!-- CENTER: semantic tree -->
+  <section class="col">
+    <h2>Semantic view <span class="kv" id="treeAge"></span></h2>
+    <div class="toolbar">
+      <input id="filter" class="f" placeholder="filter the tree…" oninput="renderTree()" />
+      <select id="scope" onchange="refreshTree(true)">
+        <option value="focused" selected>focused</option>
+        <option value="window">window</option>
+        <option value="desktop">desktop</option>
+      </select>
+    </div>
+    <div class="body" style="flex:1"><div id="tree" class="tree"><span class="empty">loading…</span></div><div id="opaque"></div></div>
+    <div class="note">Slug never captures pixels — this is the same structured text the agent reads.</div>
+  </section>
 
-  <!-- RIGHT: activity + apps -->
-  <div class="col">
-    <div class="split">
-      <div class="top">
-        <h2>Activity log</h2>
-        <div class="body log" id="log"><div class="empty">no activity yet</div></div>
-      </div>
-      <div class="bot">
-        <h2>Running apps <span id="appsCount" class="kv" style="margin-left:auto"></span></h2>
-        <div class="body apps" id="apps"><div class="empty">—</div></div>
+  <!-- RIGHT: tabs -->
+  <section class="col">
+    <div class="tabs">
+      <div class="tab active" data-tab="log" onclick="showTab('log')">Activity</div>
+      <div class="tab" data-tab="mcp" onclick="showTab('mcp')">MCP <span class="badge" id="mcpBadge">0</span></div>
+      <div class="tab" data-tab="apps" onclick="showTab('apps')">Apps <span class="badge" id="appsBadge">0</span></div>
+    </div>
+    <div class="pane active" id="pane-log"><div class="body log" id="log"><span class="empty">no activity yet</span></div></div>
+    <div class="pane" id="pane-mcp">
+      <div class="body">
+        <div id="mcpList"><span class="empty">…</span></div>
+        <div class="addform">
+          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Add a custom MCP server</div>
+          <input id="mcpName" class="f" placeholder="name (e.g. github)" />
+          <div class="row">
+            <input id="mcpUrl" class="f" placeholder="http://127.0.0.1:9000/mcp" />
+            <button class="primary" onclick="addMcp()">Add</button>
+          </div>
+          <div id="mcpMsg" style="color:var(--bad);font-size:11px;min-height:14px"></div>
+        </div>
       </div>
     </div>
-  </div>
+    <div class="pane" id="pane-apps"><div class="body" id="apps"><span class="empty">—</span></div></div>
+  </section>
 </main>
 
 <script>
-let rpcId=0, mcpOk=false, busOk=false;
-async function callTool(name, args={}) {
-  const res = await fetch('/mcp', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ jsonrpc:'2.0', id:++rpcId, method:'tools/call', params:{ name, arguments:args } }) });
-  const json = await res.json();
-  setDot('dotMcp','connMcp', true, 'MCP connected');
-  if (json.error) throw new Error(json.error.message);
-  const b = json.result && json.result.content && json.result.content[0];
-  return { text: b ? b.text : '', isError: !!(json.result && json.result.isError) };
+let rpcId=0, mcpOk=false, busOk=false, lastStatus='idle', treeText='', treeAt=0, appsAt=0;
+const TREE_TTL=1500;
+
+async function callTool(name, args={}){
+  const r = await fetch('/mcp',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({jsonrpc:'2.0',id:++rpcId,method:'tools/call',params:{name,arguments:args}})});
+  const j = await r.json();
+  mcpOk=true;
+  if(j.error) throw new Error(j.error.message||'tool error');
+  const c=j.result&&j.result.content&&j.result.content[0];
+  return {text:(c&&c.text)||'', isError:!!(j.result&&j.result.isError)};
 }
-function setDot(dotId, txtId, ok, label) {
-  document.getElementById(dotId).className = 'dot' + (ok?' ok':'');
-  document.getElementById(txtId).textContent = label;
+async function jget(p){ const r=await fetch(p); if(!r.ok) throw new Error(r.status); return r.json(); }
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtNum(n){return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':String(n);}
+function fmtDur(s){if(!s)return '–';const m=Math.floor(s/60),x=s%60;return m?`${m}m ${x}s`:`${x}s`;}
+function setDot(id,cls){const e=document.getElementById(id);e.className='dot'+(cls?' '+cls:'');}
+
+// ---------- header info: brain (Claude/local) + client + version ----------
+async function refreshInfo(){
+  try{
+    const i=await jget('/info');
+    document.getElementById('ver').textContent='v'+(i.version||'');
+    const b=i.brain||{};
+    const local=b.location==='local';
+    const label = local ? ('Local · '+(b.provider||'?')) :
+      (b.provider==='claude'?'Claude':(b.provider||'cloud'));
+    document.getElementById('brainName').textContent=label;
+    setDot('brainDot', b.provider?'ok':'warn');
+    document.getElementById('brainEmoji').textContent= local?'💻':'☁️';
+    document.getElementById('brainName2').textContent=label;
+    document.getElementById('brainSub').textContent=(b.model||'')+(local?' (on this machine)':' (cloud API)');
+    const c=i.client||{};
+    document.getElementById('clientTxt').textContent=c.connected?'MCP client connected':'no client';
+    setDot('clientDot', c.connected?'ok':'');
+  }catch(e){}
 }
 
-let lastStatus='idle', treeAt=0;
-const TREE_INTERVAL=1500; let statusInFlight=false, treeInFlight=false, appsAt=0;
-function tickInterval(){ return lastStatus==='running' ? 800 : 3000; }
-
-async function loop() {
-  await refreshStatus();
-  if (!document.hidden) refreshApprovals();
-  if (!document.hidden && Date.now()-treeAt > TREE_INTERVAL) refreshTree(false);
-  if (!document.hidden && Date.now()-appsAt > 5000) refreshApps();
-  if (treeAt) document.getElementById('treeAge').textContent = '· '+rel(treeAt,Date.now())+' ago';
-  setTimeout(loop, tickInterval());
-}
-
-// --- Destructive-action approvals (human-in-the-loop) ---
-let approvalsInFlight=false;
-async function refreshApprovals(){
-  if (approvalsInFlight) return; approvalsInFlight=true;
-  try {
-    const res = await fetch('/approvals');
-    if (!res.ok) return;
-    const { pending=[] } = await res.json();
-    const box = document.getElementById('approvals');
-    if (!pending.length) { box.hidden = true; box.innerHTML=''; return; }
-    box.hidden = false;
-    let html = '<div class="hdr">⚠ '+pending.length+' destructive action'+(pending.length>1?'s':'')+' awaiting approval</div>';
-    for (const a of pending) {
-      html += '<div class="ap"><span class="txt">'+esc(a.summary||a.tool)+'</span>'
-            + '<span class="age">'+ (a.age_s||0) +'s</span>'
-            + '<button class="ok" onclick="decide('+a.id+',true)">Approve</button>'
-            + '<button class="no" onclick="decide('+a.id+',false)">Deny</button></div>';
+// ---------- agent status ----------
+let statusBusy=false;
+async function refreshStatus(){
+  if(statusBusy)return; statusBusy=true;
+  try{
+    const {text}=await callTool('slug_agent_status');
+    const s=JSON.parse(text); lastStatus=s.status||'idle';
+    const pill=document.getElementById('statusPill');
+    pill.textContent=s.status||'idle'; pill.className='statuspill s-'+(s.status||'idle');
+    document.getElementById('mSteps').textContent=s.steps??0;
+    document.getElementById('mTokens').textContent=fmtNum(s.tokens||0);
+    document.getElementById('mCost').textContent='$'+(s.cost_usd||0).toFixed(4);
+    document.getElementById('mElapsed').textContent=s.elapsed_s?fmtDur(s.elapsed_s):'–';
+    document.getElementById('mTask').textContent=s.task||'—';
+    // live brain overrides config when a task is running
+    if(s.provider){
+      const local=(s.provider==='ollama');
+      const label=local?('Local · '+s.provider):(s.provider==='claude'?'Claude':s.provider);
+      document.getElementById('brainName').textContent=label;
+      document.getElementById('brainName2').textContent=label;
+      document.getElementById('brainSub').textContent=(s.model||'')+(s.tier?(' · '+s.tier):'');
     }
-    box.innerHTML = html;
-  } catch(e) {} finally { approvalsInFlight=false; }
-}
-async function decide(id, approved){
-  try { await fetch('/approve', { method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({ id, approved }) }); } catch(e) {}
-  refreshApprovals();
-}
-
-async function refreshStatus() {
-  if (statusInFlight) return; statusInFlight=true;
-  try {
-    const { text } = await callTool('slug_agent_status');
-    const s = JSON.parse(text);
-    lastStatus = s.status||'idle';
-    setPill('statusPill', s.status);
-    document.getElementById('mSteps').textContent = s.steps ?? 0;
-    document.getElementById('mTokens').textContent = fmtNum(s.tokens||0);
-    document.getElementById('mCost').textContent = '$'+(s.cost_usd||0).toFixed(4);
-    document.getElementById('mElapsed').textContent = s.elapsed_s ? fmtDur(s.elapsed_s) : '–';
-    document.getElementById('mBrain').textContent =
-      [s.provider, s.model, s.tier].filter(Boolean).join(' · ') || '—';
-    document.getElementById('mTask').textContent = s.task || '—';
-    setButtons(s.status);
-    renderLog(s.log||[]);
-  } catch(e) { setDot('dotMcp','connMcp', false, 'MCP error'); setPill('statusPill','error'); }
-  finally { statusInFlight=false; }
-}
-function setPill(id, status){ const e=document.getElementById(id); e.textContent=status||'idle'; e.className='pill '+(status||'idle'); }
-function setButtons(status){ const r=status==='running', p=status==='paused';
-  bStart.disabled=r||p; bPause.disabled=!r; bResume.disabled=!p; bStop.disabled=!(r||p); }
-function fmtNum(n){ return n>=1000 ? (n/1000).toFixed(1)+'k' : ''+n; }
-function fmtDur(s){ const m=Math.floor(s/60); return m? m+'m'+(s%60)+'s' : s+'s'; }
-
-const seen=new Map();
-function renderLog(lines){
-  const box=document.getElementById('log');
-  if(!lines.length){ box.innerHTML='<div class="empty">no activity yet</div>'; return; }
-  const now=Date.now(); box.innerHTML='';
-  for(const line of lines){
-    if(!seen.has(line)) seen.set(line, now);
-    const row=document.createElement('div'); let cls='row';
-    if(line.includes('[ERROR]')||line.startsWith('·')) cls+=' err';
-    else if(line.startsWith('✓')) cls+=' done';
-    else if(/^[●▶⏸■]/.test(line)) cls+=' head';
-    row.className=cls;
-    const ts=document.createElement('span'); ts.className='ts'; ts.textContent=rel(seen.get(line),now);
-    const msg=document.createElement('span'); msg.className='msg'; msg.textContent=line;
-    row.appendChild(ts); row.appendChild(msg); box.appendChild(row);
-  }
-  const cur=new Set(lines); for(const k of seen.keys()) if(!cur.has(k)) seen.delete(k);
-  box.scrollTop=box.scrollHeight;
-}
-function rel(then,now){ const s=Math.floor((now-then)/1000); if(s<1)return'now'; if(s<60)return s+'s'; const m=Math.floor(s/60); return m<60?m+'m':Math.floor(m/60)+'h'; }
-
-async function refreshApps(){
-  appsAt=Date.now();
-  try {
-    const { text } = await callTool('slug_list_apps');
-    const box=document.getElementById('apps');
-    const lines=(text||'').split('\n').filter(l=>l.trim() && !l.startsWith('('));
-    document.getElementById('appsCount').textContent = lines.length? lines.length+' apps':'';
-    box.innerHTML = lines.length ? '' : '<div class="empty">none</div>';
-    for(const l of lines){ const d=document.createElement('div'); d.textContent=l.replace(/^- /,''); box.appendChild(d); }
-  } catch(e){ /* keep last */ }
+    const log=document.getElementById('log');
+    if(s.log&&s.log.length){
+      log.innerHTML=s.log.map(l=>`<div class="line${/\[ERROR\]|error/i.test(l)?' err':''}">${esc(l)}</div>`).join('');
+    }
+    setDot('busDot','ok'); document.getElementById('busTxt').textContent='perception';
+  }catch(e){ setDot('busDot','bad'); document.getElementById('busTxt').textContent='offline'; }
+  finally{ statusBusy=false; }
 }
 
-const ROLE_CLASS={window:'window',dialog:'window',button:'button',entry:'entry',textbox:'entry',
-  checkbox:'checkbox',radio:'checkbox','switch':'checkbox',text:'text',label:'text',link:'link',
-  menu:'menu',menuitem:'menu',combobox:'menu'};
-
+// ---------- semantic tree ----------
 async function refreshTree(force){
-  if(treeInFlight) return; if(!force && document.hidden) return; treeInFlight=true;
+  if(!force && Date.now()-treeAt<TREE_TTL) return;
   const scope=document.getElementById('scope').value;
-  try {
-    const { text } = await callTool('slug_snapshot', { scope });
-    renderTree(text||''); treeAt=Date.now();
-    setDot('dotBus','connBus', true, 'perception OK');
-  } catch(e){
-    setDot('dotBus','connBus', false, 'perception: '+e.message.slice(0,40));
-    document.getElementById('tree').innerHTML='<span class="err">snapshot error: '+esc(e.message)+'</span>';
-  } finally { treeInFlight=false; }
+  try{
+    const {text}=await callTool('slug_snapshot',{scope});
+    treeText=text; treeAt=Date.now(); renderTree();
+  }catch(e){ document.getElementById('tree').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
 }
-
-function renderTree(raw){
-  const treeEl=document.getElementById('tree'), opaqueEl=document.getElementById('opaque');
-  treeEl.className='tree';
-  if(!raw.trim()){ treeEl.className='tree empty'; treeEl.textContent='(empty — nothing focused or no accessible tree)'; opaqueEl.innerHTML=''; return; }
-  const lines=raw.split('\n'); let html='', opaque='', inOpaque=false, nodeCount=0, rootName='', opaqueCount=0;
-  for(const line of lines){
-    if(line.startsWith('#')){ inOpaque=true; if(line.includes('- '))opaqueCount++; opaque+=esc(line.replace(/^#\s?/,''))+'\n'; continue; }
-    if(inOpaque){ if(line.includes('- '))opaqueCount++; opaque+=esc(line.replace(/^#\s?/,''))+'\n'; continue; }
-    if(!line.trim()) continue;
-    if(!rootName){ const nm=line.match(/"([^"]*)"/); if(nm)rootName=nm[1]; }
-    nodeCount++; html+=renderNodeLine(line)+'\n';
+function renderTree(){
+  const q=(document.getElementById('filter').value||'').toLowerCase();
+  const lines=treeText.split('\n').filter(l=>l.length);
+  const out=[];
+  for(const ln of lines){
+    if(q && !ln.toLowerCase().includes(q)) continue;
+    if(ln.trim().startsWith('#')){ out.push('<span class="cmt">'+esc(ln)+'</span>'); continue; }
+    let h=esc(ln)
+      .replace(/^(\s*-\s)([a-z_]+)/,'$1<span class="role">$2</span>')
+      .replace(/(&quot;[^&]*&quot;)/,'<span class="nm">$1</span>')
+      .replace(/(\[ref=[^\]]+\])/,'<span class="ref">$1</span>')
+      .replace(/(\[(?:focused|checked|selected|expanded|disabled|readonly|required|invalid)\])/g,'<span class="st">$1</span>')
+      .replace(/(@-?\d+,-?\d+)/,'<span class="xy">$1</span>');
+    out.push(h);
   }
-  treeEl.innerHTML=html||'<span class="empty">(empty)</span>';
-  opaqueEl.innerHTML = opaque.trim()? '<div class="opaque">⚠ opaque apps (no accessible tree — use slug_key / slug_click to drive them):\n'+opaque+'</div>':'';
-  let s=nodeCount+' node'+(nodeCount===1?'':'s'); if(rootName)s+=' · '+rootName; if(opaqueCount)s+=' · '+opaqueCount+' opaque';
-  document.getElementById('treeStats').textContent=s;
-  applyFilter();
+  document.getElementById('tree').innerHTML=out.length?out.join('\n'):'<span class="empty">no matching nodes</span>';
+  document.getElementById('treeAge').textContent=treeAt?('· '+Math.round((Date.now()-treeAt)/1000)+'s ago'):'';
 }
 
-function renderNodeLine(line){
-  const indent=(line.match(/^(\s*)/)||['',''])[1];
-  let rest=line.slice(indent.length).replace(/^-\s*/,'');
-  const roleM=rest.match(/^([A-Za-z_]+)/); const role=roleM?roleM[1]:''; rest=rest.slice(role.length);
-  let name=''; const nm=rest.match(/^\s*"([^"]*)"/); if(nm){ name=nm[1]; rest=rest.slice(nm[0].length); }
-  let brackets=''; const re=/\[([^\]]+)\]/g; let m;
-  while((m=re.exec(rest))!==null){ const inner=m[1];
-    if(inner.startsWith('ref=')){ const r=inner.slice(4); brackets+=`<span class="ref" title="copy" onclick="copyRef(this,'${esc(r)}')">${esc(r)}</span>`; }
-    else brackets+=`<span class="st ${esc(inner)}">${esc(inner)}</span>`;
-  }
-  const coordM=rest.match(/@(-?\d+),(-?\d+)/); const coord = coordM? ` <span class="coord" title="slug_click ${coordM[1]},${coordM[2]}">@${coordM[1]},${coordM[2]}</span>`:'';
-  const rc=ROLE_CLASS[role.toLowerCase()]||'';
-  const nameHtml=name?` <span class="name">"${esc(name)}"</span>`:'';
-  const text=(role+' '+name).toLowerCase();
-  return `<span class="node" data-t="${esc(text)}">${indent}<span class="muted">- </span><span class="role ${rc}">${esc(role)}</span>${nameHtml} ${brackets}${coord}</span>`;
+// ---------- running apps ----------
+async function refreshApps(){
+  try{
+    const {text}=await callTool('slug_list_apps');
+    const lines=text.split('\n').filter(l=>l.trim().startsWith('- '));
+    document.getElementById('appsBadge').textContent=lines.length;
+    document.getElementById('apps').innerHTML= lines.length? lines.map(l=>{
+      const m=l.match(/^-\s+(.*?)\s*(\[(.*)\])?$/);
+      const nm=m?m[1]:l, bus=m&&m[3]?m[3]:'';
+      return `<div class="app-item"><span class="nm">${esc(nm)}</span><span class="bus mono">${esc(bus)}</span></div>`;
+    }).join('') : '<span class="empty">no accessible apps</span>';
+  }catch(e){ document.getElementById('apps').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
 }
 
-function applyFilter(){
-  const q=document.getElementById('filter').value.trim().toLowerCase();
-  for(const n of document.querySelectorAll('#tree .node')){
-    n.classList.toggle('hidden', q && !(n.getAttribute('data-t')||'').includes(q));
-  }
+// ---------- MCP servers ----------
+async function refreshMcp(){
+  try{
+    const j=await jget('/mcp-servers'); const servers=j.servers||[];
+    const custom=servers.filter(s=>s.kind!=='self').length;
+    const reachable=servers.filter(s=>s.status==='reachable'||s.status==='serving').length;
+    document.getElementById('mcpCount').textContent=reachable;
+    document.getElementById('mcpBadge').textContent=servers.length;
+    setDot('mcpDot', reachable>0?'ok':'warn');
+    document.getElementById('mcpList').innerHTML=servers.map(s=>{
+      const cls=s.status||'command';
+      const label={serving:'serving',reachable:'connected',unreachable:'unreachable',command:'command'}[cls]||cls;
+      const rm=s.kind==='self'?'':`<button class="x" title="remove" onclick="removeMcp('${esc(s.name)}')">✕</button>`;
+      return `<div class="mcp-item mono"><div><div class="nm">${esc(s.name)}</div><div class="url">${esc(s.url)}</div></div>
+        <span class="stat ${cls}">${label}</span>${rm}</div>`;
+    }).join('')||'<span class="empty">none</span>';
+  }catch(e){ document.getElementById('mcpList').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
 }
-function copyRef(el,ref){ navigator.clipboard&&navigator.clipboard.writeText(ref);
-  el.classList.add('copied'); const t=el.textContent; el.textContent=ref+' ✓'; setTimeout(()=>{el.classList.remove('copied');el.textContent=t;},800); }
+async function addMcp(){
+  const name=document.getElementById('mcpName').value.trim();
+  const url=document.getElementById('mcpUrl').value.trim();
+  const msg=document.getElementById('mcpMsg'); msg.textContent='';
+  try{
+    const r=await fetch('/mcp-servers',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({name,url})});
+    if(!r.ok){ const j=await r.json().catch(()=>({})); throw new Error(j.error||('HTTP '+r.status)); }
+    document.getElementById('mcpName').value=''; document.getElementById('mcpUrl').value='';
+    refreshMcp();
+  }catch(e){ msg.textContent=e.message; }
+}
+async function removeMcp(name){
+  try{ await fetch('/mcp-servers',{method:'DELETE',headers:{'content-type':'application/json'},
+    body:JSON.stringify({name})}); refreshMcp(); }catch(e){}
+}
 
-async function startTask(){ const i=document.getElementById('taskInput'); const d=i.value.trim(); if(!d)return;
-  try{ await callTool('slug_agent_start_task',{description:d}); i.value=''; }catch(e){ alert('Could not start: '+e.message); } refreshStatus(); }
+// ---------- approvals ----------
+let apBusy=false;
+async function refreshApprovals(){
+  if(apBusy)return; apBusy=true;
+  try{
+    const r=await fetch('/approvals'); if(!r.ok)return;
+    const {pending=[]}=await r.json(); const box=document.getElementById('approvals');
+    if(!pending.length){ box.hidden=true; box.innerHTML=''; return; }
+    box.hidden=false;
+    box.innerHTML='<div class="hdr">⚠ '+pending.length+' destructive action'+(pending.length>1?'s':'')+' awaiting your approval</div>'+
+      pending.map(a=>`<div class="ap"><span class="txt mono">${esc(a.summary||a.tool)}</span>
+        <span class="age">${a.age_s||0}s</span>
+        <button class="primary" onclick="decide(${a.id},true)">Approve</button>
+        <button onclick="decide(${a.id},false)" style="border-color:var(--bad);color:#ffb4ae">Deny</button></div>`).join('');
+  }catch(e){}finally{apBusy=false;}
+}
+async function decide(id,approved){
+  try{ await fetch('/approve',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({id,approved})}); }catch(e){} refreshApprovals();
+}
+
+// ---------- tabs ----------
+function showTab(t){
+  document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.tab===t));
+  document.querySelectorAll('.pane').forEach(e=>e.classList.toggle('active',e.id==='pane-'+t));
+  if(t==='mcp') refreshMcp(); if(t==='apps') refreshApps();
+}
+
+// ---------- actions ----------
+async function startTask(){
+  const i=document.getElementById('taskInput'); const d=i.value.trim(); if(!d)return;
+  try{ await callTool('slug_agent_start_task',{description:d}); i.value=''; }catch(e){ alert(e.message); }
+  refreshStatus();
+}
 async function ctl(name){ try{ await callTool(name); }catch(e){} refreshStatus(); }
-function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ refreshTree(true); refreshApps(); } });
-refreshTree(true); refreshApps(); loop();
+// ---------- loop ----------
+function tick(){ return lastStatus==='running'?900:3000; }
+async function loop(){
+  if(!document.hidden){
+    await refreshStatus(); refreshApprovals();
+    refreshTree(false);
+    if(Date.now()-appsAt>5000){ appsAt=Date.now(); if(document.getElementById('pane-apps').classList.contains('active')) refreshApps(); }
+  }
+  setTimeout(loop, tick());
+}
+function slowLoop(){ if(!document.hidden){ refreshInfo();
+  if(document.getElementById('pane-mcp').classList.contains('active')) refreshMcp(); }
+  setTimeout(slowLoop, 5000); }
+
+refreshInfo(); refreshMcp(); refreshTree(true); loop(); slowLoop();
 </script>
 </body>
 </html>

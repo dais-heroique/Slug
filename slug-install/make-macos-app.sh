@@ -50,7 +50,21 @@ if ! curl -s "http://127.0.0.1:7333/healthz" >/dev/null 2>&1; then
     sleep 0.3
   done
 fi
-open "http://127.0.0.1:7333/dashboard"
+# Open the dashboard as its OWN app window (Chrome/Edge/Brave --app), so it looks
+# like a native app rather than a browser tab on localhost. Fall back to the
+# default browser if none is installed.
+URL="http://127.0.0.1:7333/dashboard"
+open_app_window() {
+  for b in "Google Chrome" "Microsoft Edge" "Brave Browser" "Chromium"; do
+    APP="/Applications/$b.app/Contents/MacOS/${b}"
+    if [ -x "$APP" ]; then
+      "$APP" --app="$URL" --window-size=1280,860 >/dev/null 2>&1 &
+      return 0
+    fi
+  done
+  return 1
+}
+open_app_window || open "$URL"
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/Slug" "$APP/Contents/MacOS/slug-mcp" \
   "$APP/Contents/MacOS/slug" "$APP/Contents/MacOS/slug-agent"
