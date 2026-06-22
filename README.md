@@ -1,14 +1,16 @@
 # Slug
 
-**Slug** is a Linux OS design whose primary user is an AI agent: instead of
+**Slug** is an OS design whose primary user is an AI agent: instead of
 perceiving the screen through screenshots, the agent reads a mandatory, OS-wide
 **semantic UI layer** — a typed, delta-compressed representation of every widget.
 See [`docs/`](./docs) for the full design dossier.
 
-This repository implements **Milestone 1** + **M1.5**: a *semantic bus* that
-harvests the OS accessibility tree and exposes it as an **MCP server**, so you can
-connect Claude Code (or any MCP client) and have it read and drive native apps —
-no pixels required. As of **M1.5** the installable layer is **cross-platform**:
+This repository implements the **semantic bus**: it harvests the OS accessibility
+tree and exposes it as an **MCP server**, so you can connect Claude Code (or any
+MCP client) and have it read and drive native apps — no pixels required. On top of
+the bus it adds a multi-provider agent loop (`slug-brain`), an MCP-native control
+dashboard, synthetic keyboard/mouse/scroll input, and one-click installers. The
+installable layer is **cross-platform**:
 
 | OS | Accessibility source | Permissions |
 |----|----------------------|-------------|
@@ -30,7 +32,7 @@ semantic model (`slug-core`), the MCP server (`slug-mcp`), and the agent
 |---------------|------|
 | `slug-core`   | The unified semantic document model — a faithful Rust mirror of [`docs/SEMANTIC-SCHEMA.md`](./docs/SEMANTIC-SCHEMA.md): `SlugNode`, `SlugRole`, `SlugState`, `SlugDelta`, stable refs, the document arena, and the Playwright-MCP-style YAML serializer. Depends only on `serde`. |
 | `slug-bridge` | The cross-platform accessibility harvester. One `AccessibilityBackend` trait with three implementations — `backend_atspi` (Linux/AT-SPI2), `backend_uia` (Windows/UI Automation), `backend_ax` (macOS/AX) — selected per `cfg(target_os)`. Walks application trees, maps native roles/states to Slug, executes actions, and flags opaque (vision-fallback) apps. |
-| `slug-mcp`    | The MCP server: JSON-RPC 2.0 over **stdio** and **streamable HTTP**, exposing four tools. This is the session layer that maps internal ULID refs to short agent-facing aliases (`b1`, `e5`). |
+| `slug-mcp`    | The MCP server: JSON-RPC 2.0 over **stdio** and **streamable HTTP**, exposing the perception/action and agent-control tools (see [Tools](#tools)). This is the session layer that maps internal ULID refs to short agent-facing aliases (`b1`, `e5`), and it enforces the destructive-action [approval gate](#safety) for external clients. |
 | `slug-cli`    | A `slug` binary for driving the bus by hand (snapshot, list apps, invoke actions, stream live events). |
 | `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools. **Multi-provider**: Claude, OpenAI/OpenRouter/any OpenAI-compatible server, Gemini, or local Ollama — chosen in `slug.toml` or auto-selected from detected hardware. See [Providers](#providers-multi-provider-brain). |
 
@@ -105,8 +107,9 @@ in [CI](.github/workflows/ci.yml) on `windows-latest` / `macos-latest`.
 
 ## Install
 
-The easiest path is a **release download** — a double-click **Slug.app** on macOS,
-an `install.ps1` on Windows, a tarball on Linux — see **[INSTALL.md](./INSTALL.md)**
+The easiest path is a **release download** — a drag-to-install **`.dmg`** (or
+zipped **Slug.app**) on macOS, a one-click **`SlugSetup.exe`** installer (or a zip
++ `install.ps1`) on Windows, a tarball on Linux — see **[INSTALL.md](./INSTALL.md)**
 for downloads, permissions, and the AI-provider setup on every OS. To build it
 yourself instead:
 
@@ -143,7 +146,7 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 
 | Tool | Input | Result |
 |------|-------|--------|
-| `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop" }` | The UI as a Playwright-style YAML tree; each node has a short `[ref=…]`. |
+| `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop", "filter"?: "…", "roles"?: ["button"], "interactive_only"?: bool, "limit"?: 50 }` | The UI as a Playwright-style YAML tree; each node has a short `[ref=…]`. With `filter`/`roles`/`interactive_only` it returns a compact **flat list** of just the matching nodes (each with `ref` + centre `@x,y`) — a server-side "grep" so you don't ship the whole tree. |
 | `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action. |
 | `slug_launch` | `{ "name": "Spotify", "uri"?: "spotify:playlist:…" }` | **Launch** an app by name (and optionally open a URI / deep link). Slug otherwise only drives already-running apps. See [Controlling any app](#controlling-any-app-launch-keyboard-mouse). |
 | `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. |
@@ -228,14 +231,17 @@ This is still **no pixels and no model tokens**: it posts an OS input event, it 
 screenshot+vision fallback — it works on any app the OS can route keystrokes to,
 without the cost and storage of images.
 
-Implemented on **macOS** (Quartz `CGEvent`; needs Accessibility — and on recent
-macOS, Input Monitoring — permission) and **Windows** (`SendInput`; no special
-permission). On **Linux**, synthetic input is constrained by the OS itself —
-Wayland blocks event injection by design and X11 would need XTEST — so `slug_key`
-returns a clear, explained tool error there (never a crash); the semantic path
-(`slug_snapshot`/`slug_invoke`) remains fully functional on Linux. The macOS and
-Windows synthetic paths are compile-verified on their target triples and need a
-real-hardware smoke test, as with the rest of the per-OS backends.
+Implemented in-process on **macOS** (Quartz `CGEvent`; needs Accessibility — and on
+recent macOS, Input Monitoring — permission) and **Windows** (`SendInput`; no
+special permission). On **Linux**, Wayland blocks in-process injection by design,
+so Slug shells out to a system input tool when one is installed: **`xdotool`**
+(X11/XWayland — full support: keys, text, click, scroll) or **`ydotool`** (Wayland
+— text + click). If neither is present, `slug_key`/`slug_click`/`slug_scroll`
+return a clear, explained tool error (never a crash); the semantic path
+(`slug_snapshot`/`slug_invoke`) needs no injection and remains fully functional on
+Linux. The macOS and Windows synthetic paths are compile-verified on their target
+triples and need a real-hardware smoke test, as with the rest of the per-OS
+backends.
 
 ### Snapshot latency
 
@@ -417,6 +423,13 @@ ollama). The `--probe` report recommends a provider too.
   `submit` / … are pattern-matched (against the action, argument, and the model's
   stated reasoning) and gated behind a confirmation hook (`y/N` on the terminal;
   auto-deny with `--non-interactive`).
+- **Server-side approval for external clients** — the same detection is enforced
+  at the MCP server, so a client driving Slug directly (e.g. Claude Code) is gated
+  too, not just the in-process agent. Controlled by `SLUG_DESTRUCTIVE`
+  (`ask` | `deny` | `allow`, default `ask`): in `ask` mode a destructive
+  `slug_invoke` **blocks until a human approves/denies it in the dashboard**
+  (`GET /approvals`, `POST /approve`; ~120 s timeout → denied). The shared
+  detection lives in `slug-core::is_destructive`.
 - **Structured action log** — every action is logged with its reasoning and
   result, with best-effort **undo** of the last action (e.g. restore prior text,
   re-toggle).
@@ -433,12 +446,16 @@ separate protocol. `slug-mcp` exposes agent-control tools (`slug_agent_start_tas
 and serves a tiny static dashboard at **`GET /dashboard`** (when run with
 `--http`). It is a single self-contained HTML/JS file (no framework) laid out in
 three columns — **agent control** (task box, start/pause/resume/stop, live
-provider/tier/model badge, connection indicator), **semantic tree** (role-coloured,
-clickable `ref` chips, state pills, scope selector), and **action log** (reasoning/
-result lines, errors in red). It:
+provider/tier/model badge, connection indicators, and metric tiles for
+steps/elapsed/tokens/cost), **semantic tree** (role-coloured, clickable `ref`
+chips, state pills, a filter box, scope selector), and a split right column with
+the **activity log** (reasoning/result lines, errors in red) over a **running-apps**
+panel. A red **approvals banner** appears above all three when a destructive action
+is awaiting human approval, with Approve/Deny buttons. It:
 
 - polls `slug_agent_status` (≈1 s while a task runs, throttled to 3 s when idle, and
   paused entirely when the browser tab is hidden — low latency, low overhead);
+- polls `GET /approvals` and lets a human approve/deny gated destructive actions;
 - renders the live semantic tree from `slug_snapshot` **as text** — the exact
   hierarchy the agent reads;
 - has a text box that calls `slug_agent_start_task`.
@@ -472,8 +489,10 @@ must never be reachable from a web page in your browser. It binds **loopback onl
 Builds the Rust binaries (a few MB — **no models are downloaded**), writes a
 starter `~/.slug/slug.toml` (defaulting to `ollama` if detected, else `claude`),
 and registers a launchd agent that runs `slug-mcp --http` at login with the
-dashboard. See [`slug-install/README.md`](./slug-install/README.md) (Windows is a
-documented manual path for now).
+dashboard (and sets `SLUG_DESTRUCTIVE=ask`). Windows has a one-click installer
+(`SlugSetup.exe`) and `install.ps1`; Linux runs the daemon directly or via a
+systemd `--user` unit. See [INSTALL.md](./INSTALL.md) and
+[`slug-install/README.md`](./slug-install/README.md).
 
 ## Milestone-1 adaptations
 
