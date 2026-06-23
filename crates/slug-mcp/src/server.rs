@@ -277,10 +277,10 @@ pub async fn run_http(
         }
     }
 
-    /// Inject an API key for THIS SESSION only. Body: `{ env, value }`.
-    /// The value is set as an environment variable in the running process (and so
-    /// inherited by the agent it spawns) — it is **never written to disk** and is
-    /// gone on restart.
+    /// Save an API key for a provider env var. Body: `{ env, value }`.
+    /// The value is set in the running process (inherited by the agent) **and**
+    /// persisted to `~/.slug/secrets.env` (0600) so it survives a restart — it is
+    /// **never** written to `slug.toml`.
     async fn provider_key(
         headers: axum::http::HeaderMap,
         Json(body): Json<serde_json::Value>,
@@ -294,10 +294,30 @@ pub async fn run_http(
             return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "env and value required" })))
                 .into_response();
         }
-        // In-memory only; inherited by the spawned agent. Never persisted.
         std::env::set_var(env, value);
-        Json(serde_json::json!({ "ok": true, "env": env, "key_present": crate::dashboard_api::key_present(env) }))
-            .into_response()
+        match crate::dashboard_api::save_secret(env, value) {
+            Ok(()) => Json(serde_json::json!({
+                "ok": true, "env": env, "saved": true,
+                "key_present": crate::dashboard_api::key_present(env)
+            }))
+            .into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))).into_response(),
+        }
+    }
+
+    /// Forget a saved API key. Body: `{ env }`.
+    async fn provider_key_forget(
+        headers: axum::http::HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> axum::response::Response {
+        if !local_request_ok(&headers) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let env = body.get("env").and_then(Value::as_str).unwrap_or("");
+        match crate::dashboard_api::forget_secret(env) {
+            Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))).into_response(),
+        }
     }
 
     /// Accept a request only if it is local: any present `Origin` and `Host`
@@ -341,7 +361,7 @@ pub async fn run_http(
         .route("/approve", post(decide_approval))
         .route("/mcp-servers", get(mcp_servers_list).post(mcp_servers_add).delete(mcp_servers_remove))
         .route("/providers", get(providers_get).post(providers_set))
-        .route("/provider-key", post(provider_key))
+        .route("/provider-key", post(provider_key).delete(provider_key_forget))
         .route("/healthz", get(|| async { "ok" }))
         .with_state(AppState {
             session,

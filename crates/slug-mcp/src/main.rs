@@ -18,6 +18,10 @@ async fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let mode = args.next();
 
+    // Load saved provider API keys (~/.slug/secrets.env) into the environment so
+    // the brain/agent use them without re-entry. The real environment wins.
+    slug_mcp::dashboard_api::load_secrets_into_env();
+
     let session = Session::new();
     let control = AgentController::new();
 

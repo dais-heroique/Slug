@@ -190,7 +190,7 @@
     <div class="pane" id="pane-brain"><div class="body">
       <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Connect an AI provider (API)</div>
       <div id="providers"><span class="empty">…</span></div>
-      <div class="note" style="border:none;padding:8px 0 0">Keys are read from env vars and never written to disk. A key you paste here is kept in memory for this session only.</div>
+      <div class="note" style="border:none;padding:8px 0 0">A key you paste is saved to <span class="mono">~/.slug/secrets.env</span> (owner-only, 0600) so you don't re-enter it after a restart — never in <span class="mono">slug.toml</span>. Leave it blank to use an env var you already set.</div>
     </div></div>
     <div class="pane" id="pane-mcp">
       <div class="body">

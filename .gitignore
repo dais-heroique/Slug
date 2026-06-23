@@ -1,3 +1,9 @@
 /target
 **/*.rs.bk
 Cargo.lock.orig
+# Never commit local secrets / runtime artifacts
+secrets.env
+**/secrets.env
+mcp_servers.json
+slug-install/windows/payload/
+dist/

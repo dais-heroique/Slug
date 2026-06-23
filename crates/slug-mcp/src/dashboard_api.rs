@@ -204,6 +204,79 @@ pub fn key_present(env: &str) -> bool {
     std::env::var(env).map(|v| !v.trim().is_empty()).unwrap_or(false)
 }
 
+// ------------------------------ secret store -------------------------------
+//
+// API keys are persisted across restarts so you don't re-enter them — but **never
+// in `slug.toml`**. They live in a dedicated `~/.slug/secrets.env` (`KEY=value`
+// per line) created with owner-only `0600` permissions, and are loaded into the
+// process environment at startup (so the brain/agent inherit them). The real
+// environment always wins over the file.
+
+fn secrets_path() -> PathBuf {
+    std::env::var("SLUG_SECRETS").map(PathBuf::from).unwrap_or_else(|_| slug_home().join("secrets.env"))
+}
+
+fn load_secret_map() -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    if let Ok(text) = std::fs::read_to_string(secrets_path()) {
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                m.insert(k.trim().to_string(), v.trim().to_string());
+            }
+        }
+    }
+    m
+}
+
+fn write_secret_map(map: &std::collections::BTreeMap<String, String>) -> Result<(), String> {
+    let path = secrets_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
+    }
+    let body: String = map.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+    std::fs::write(&path, body).map_err(|e| format!("write {}: {e}", path.display()))?;
+    // Owner-only permissions (0600) on Unix.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Persist an API key for a provider env var, so it survives an app restart.
+/// Stored in `~/.slug/secrets.env` (0600), **never** in `slug.toml`.
+pub fn save_secret(env: &str, value: &str) -> Result<(), String> {
+    let env = env.trim();
+    if env.is_empty() || value.trim().is_empty() {
+        return Err("env and value required".into());
+    }
+    let mut map = load_secret_map();
+    map.insert(env.to_string(), value.trim().to_string());
+    write_secret_map(&map)
+}
+
+/// Forget a previously-saved key.
+pub fn forget_secret(env: &str) -> Result<(), String> {
+    let mut map = load_secret_map();
+    map.remove(env.trim());
+    write_secret_map(&map)
+}
+
+/// Load saved secrets into the process environment at startup. The real
+/// environment wins, so an explicitly-exported key is never overridden.
+pub fn load_secrets_into_env() {
+    for (k, v) in load_secret_map() {
+        if std::env::var_os(&k).is_none() {
+            std::env::set_var(&k, &v);
+        }
+    }
+}
+
 // ----------------------------- MCP server list -----------------------------
 
 fn load_servers() -> Vec<Value> {
@@ -378,6 +451,38 @@ mod tests {
 
         assert!(set_provider("bogus", "", "", "x").is_err());
         std::env::remove_var("SLUG_CONFIG");
+    }
+
+    #[test]
+    fn secrets_persist_and_load_into_env() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("slugsec{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let secrets = dir.join("secrets.env");
+        std::env::set_var("SLUG_SECRETS", &secrets);
+        std::env::remove_var("SLUG_TEST_KEY");
+
+        save_secret("SLUG_TEST_KEY", "sk-abc123").unwrap();
+        // Persisted to the secrets file, never anywhere else.
+        let body = std::fs::read_to_string(&secrets).unwrap();
+        assert!(body.contains("SLUG_TEST_KEY=sk-abc123"));
+        // 0600 on unix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&secrets).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "secrets file must be owner-only");
+        }
+        // Loads into the env on startup (real env wins, but it's unset here).
+        load_secrets_into_env();
+        assert_eq!(std::env::var("SLUG_TEST_KEY").unwrap(), "sk-abc123");
+        assert!(key_present("SLUG_TEST_KEY"));
+
+        forget_secret("SLUG_TEST_KEY").unwrap();
+        assert!(!std::fs::read_to_string(&secrets).unwrap().contains("SLUG_TEST_KEY"));
+
+        std::env::remove_var("SLUG_TEST_KEY");
+        std::env::remove_var("SLUG_SECRETS");
     }
 
     #[test]
