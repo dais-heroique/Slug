@@ -184,8 +184,6 @@ pub async fn run_http(
         if !local_request_ok(&headers) {
             return StatusCode::FORBIDDEN.into_response();
         }
-        let (provider, model) = crate::dashboard_api::brain_info();
-        let local = crate::dashboard_api::provider_is_local(&provider);
         let last = state.last_seen.load(Ordering::Relaxed);
         let age = now_secs().saturating_sub(last);
         Json(serde_json::json!({
@@ -193,11 +191,7 @@ pub async fn run_http(
             "version": env!("CARGO_PKG_VERSION"),
             "transport": "http",
             "port": state.port,
-            "brain": {
-                "provider": provider,
-                "model": model,
-                "location": if local { "local" } else { "cloud" },
-            },
+            "brain": crate::dashboard_api::brain_detail(),
             "client": {
                 "connected": last != 0 && age < 60,
                 "last_seen_s": if last == 0 { Value::Null } else { Value::from(age) },

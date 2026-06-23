@@ -151,8 +151,11 @@ pub fn tool_definitions() -> Vec<Value> {
                     "scope": {
                         "type": "string",
                         "enum": ["focused", "window", "desktop"],
-                        "description": "focused/window = the focused top-level window; \
-                            desktop = every running application.",
+                        "description": "focused/window = the focused top-level window (fastest, \
+                            prefer this); desktop = every running application across ALL monitors. \
+                            Coordinates are global screen space, so @x,y from any scope works on a \
+                            multi-monitor setup (a window on a second screen may have large or \
+                            negative x — that is normal, pass it through to slug_click as-is).",
                         "default": "window"
                     },
                     "filter": {
@@ -241,10 +244,11 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "slug_click",
-            "description": "Synthetic left mouse click at absolute screen coordinates \
-                (x, y). Lets the agent click ANYWHERE, including inside opaque apps, when \
-                it has a position (e.g. from a node's bounds). No pixels are captured. \
-                macOS + Windows implemented; Linux is OS-constrained.",
+            "description": "Synthetic left mouse click at absolute GLOBAL screen coordinates \
+                (x, y) — these span all monitors, so a point on a second screen (possibly with \
+                large or negative x) just works. Lets the agent click ANYWHERE, including inside \
+                opaque apps, when it has a position (e.g. @x,y from a filtered snapshot). No pixels \
+                are captured. macOS + Windows.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

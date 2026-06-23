@@ -35,6 +35,9 @@ struct AgentState {
     cost_usd: f64,
     started_at: Option<std::time::Instant>,
     log: VecDeque<String>,
+    /// Last few stderr lines from the child, surfaced if it dies unexpectedly so
+    /// the user sees *why* a task did nothing instead of a silent "done".
+    err_tail: VecDeque<String>,
 }
 
 impl AgentState {
@@ -79,6 +82,20 @@ impl AgentController {
             return Err("an agent task is already running; stop it first".into());
         }
 
+        // Pre-flight: the built-in agent needs an AI provider + key. If none is
+        // configured we'd otherwise spawn a child that exits instantly and shows a
+        // misleading "done". Surface the real reason up front instead.
+        if let Err(hint) = crate::dashboard_api::brain_ready() {
+            st.task = Some(description.to_string());
+            st.status = "error".into();
+            st.paused = false;
+            st.started_at = Some(std::time::Instant::now());
+            st.log.clear();
+            st.push_log(format!("▶ task: {description}"));
+            st.push_log(format!("✗ {hint}"));
+            return Ok("brain not ready — see the Brain tab".into());
+        }
+
         let mut cmd = Command::new(&self.agent_bin);
         cmd.arg("--jsonl").arg(description);
         if let Ok(cfg) = std::env::var("SLUG_CONFIG") {
@@ -108,31 +125,70 @@ impl AgentController {
         st.child = Some(child);
         drop(st);
 
-        // Parse the JSONL event stream on stdout.
-        let state = self.state.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let mut st = state.lock().await;
-                ingest_event(&mut st, &line);
-            }
-            let mut st = state.lock().await;
-            if st.status == "running" {
-                st.status = "done".into();
-            }
-            st.child = None;
-            info!("agent task stream ended ({})", st.status);
-        });
-
-        // Capture stderr (human logs) into the same buffer, tagged.
+        // Capture stderr (human logs) into a small ring so we can explain a crash,
+        // and echo ERROR/WARN lines into the visible activity log.
         let state = self.state.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                let mut st = state.lock().await;
+                st.err_tail.push_back(line.clone());
+                while st.err_tail.len() > 12 {
+                    st.err_tail.pop_front();
+                }
                 if line.contains("ERROR") || line.contains("WARN") {
-                    state.lock().await.push_log(format!("· {line}"));
+                    st.push_log(format!("· {line}"));
                 }
             }
+        });
+
+        // Parse the JSONL event stream on stdout. When it closes, reap the child
+        // and decide the terminal state from its exit code — a non-zero exit (or a
+        // silent immediate exit with no `final`) becomes a visible *error*, never a
+        // misleading "done".
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            let mut saw_final = false;
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut st = state.lock().await;
+                if ingest_event(&mut st, &line) {
+                    saw_final = true;
+                }
+            }
+            // Stream closed: reap the child for its exit status (unless the user
+            // already stopped it, which takes the handle).
+            let child = state.lock().await.child.take();
+            let exit_ok = match child {
+                Some(mut c) => c.wait().await.map(|s| s.success()).unwrap_or(false),
+                None => true,
+            };
+            let mut st = state.lock().await;
+            match st.status.as_str() {
+                "stopped" | "error" => {}
+                _ if saw_final => st.status = "done".into(),
+                _ if exit_ok => {
+                    st.status = "done".into();
+                    st.push_log("✓ finished");
+                }
+                _ => {
+                    st.status = "error".into();
+                    let tail: Vec<String> = st.err_tail.iter().cloned().collect();
+                    if tail.is_empty() {
+                        st.push_log("✗ the agent exited immediately without doing anything.");
+                    } else {
+                        for l in tail {
+                            st.push_log(format!("✗ {l}"));
+                        }
+                    }
+                    st.push_log(
+                        "✗ Hint: the built-in agent needs an AI provider + API key — open the \
+                         Brain tab and Connect one. (A connected MCP client like Claude Code \
+                         drives Slug directly and does NOT need this.)",
+                    );
+                }
+            }
+            info!("agent task stream ended ({})", st.status);
         });
 
         Ok("task started".into())
@@ -202,13 +258,15 @@ impl AgentController {
     }
 }
 
-/// Translate one JSONL event line into log/state updates.
-fn ingest_event(st: &mut AgentState, line: &str) {
+/// Translate one JSONL event line into log/state updates. Returns `true` when the
+/// line was the terminal `final` event (so the caller knows the run completed
+/// cleanly rather than crashing).
+fn ingest_event(st: &mut AgentState, line: &str) -> bool {
     let v: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(_) => {
             st.push_log(line.to_string());
-            return;
+            return false;
         }
     };
     match v.get("kind").and_then(Value::as_str) {
@@ -243,9 +301,11 @@ fn ingest_event(st: &mut AgentState, line: &str) {
             let answer = v.get("answer").and_then(Value::as_str).unwrap_or("");
             st.push_log(format!("✓ {answer}"));
             st.status = "done".into();
+            return true;
         }
         _ => st.push_log(line.to_string()),
     }
+    false
 }
 
 /// Send a job-control signal to a pid via `kill` (portable across macOS/Linux).

@@ -120,13 +120,26 @@ pub fn render_filtered(
 
     // Collect matches, scored by how well the name matches the query so the best
     // hit comes first (so `limit: 1` returns exactly the control you meant).
+    //
+    // Speed: when there is NO text query there is nothing to rank, so we keep at
+    // most `limit` nodes (and never allocate/sort a vector the size of the whole
+    // tree) while still counting every match for the overflow note. With a query
+    // we must see them all to rank, so we collect then stable-sort.
     let mut hits: Vec<(u8, &SlugNode)> = Vec::new();
+    let mut matched = 0usize;
     for node in doc.bfs_order() {
         if !filter_matches(node, needle.as_deref(), roles, interactive_only) {
             continue;
         }
-        let score = needle.as_deref().map(|n| match_score(node, n)).unwrap_or(3);
-        hits.push((score, node));
+        matched += 1;
+        match needle.as_deref() {
+            Some(n) => hits.push((match_score(node, n), node)),
+            None => {
+                if hits.len() < limit {
+                    hits.push((3, node));
+                }
+            }
+        }
     }
     if needle.is_some() {
         // Stable sort by score (exact → prefix → word → contains); BFS order
@@ -134,7 +147,6 @@ pub fn render_filtered(
         hits.sort_by_key(|(s, _)| *s);
     }
 
-    let matched = hits.len();
     let mut out = String::new();
     for (_, node) in hits.iter().take(limit) {
         render_flat_line(node, aliases, coords, &mut out);

@@ -81,6 +81,56 @@ pub fn provider_is_local(provider: &str) -> bool {
     matches!(provider, "ollama" | "local")
 }
 
+/// The env var that holds the active provider's API key: an explicit
+/// `api_key_env` in `slug.toml` wins, else the catalog default for the slot.
+fn active_key_env() -> String {
+    let (provider, _) = brain_info();
+    if let Some(env) = config_value(&format!("providers.{provider}"), "api_key_env") {
+        if !env.trim().is_empty() {
+            return env;
+        }
+    }
+    provider_catalog()
+        .iter()
+        .find(|p| p.2 == provider)
+        .map(|p| p.4.to_string())
+        .unwrap_or_default()
+}
+
+/// Whether Slug's **built-in** agent can run: local providers always can; cloud
+/// providers need their API key present in the environment. Returns a clear,
+/// actionable hint when it can't (shown in the dashboard instead of a silent
+/// failure).
+pub fn brain_ready() -> Result<(), String> {
+    let (provider, _) = brain_info();
+    if provider_is_local(&provider) {
+        return Ok(());
+    }
+    let env = active_key_env();
+    if env.is_empty() || key_present(&env) {
+        Ok(())
+    } else {
+        Err(format!(
+            "no API key for the built-in agent — set {env} in the Brain tab (or export it), \
+             then try again."
+        ))
+    }
+}
+
+/// Brain summary for the dashboard header: provider, model, cloud/local, the key
+/// env var, and whether the built-in agent is ready to run.
+pub fn brain_detail() -> Value {
+    let (provider, model) = brain_info();
+    let local = provider_is_local(&provider);
+    json!({
+        "provider": provider,
+        "model": model,
+        "location": if local { "local" } else { "cloud" },
+        "key_env": active_key_env(),
+        "ready": brain_ready().is_ok(),
+    })
+}
+
 // ------------------------------ AI providers -------------------------------
 //
 // "Connect via API" from the dashboard. Every entry maps to one of the brain's
@@ -417,6 +467,35 @@ mod tests {
         assert_eq!(p, "ollama");
         assert_eq!(m, "qwen3:14b");
         assert!(provider_is_local(&p));
+        std::env::remove_var("SLUG_CONFIG");
+    }
+
+    #[test]
+    fn brain_ready_requires_a_key_for_cloud_but_not_local() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("slugready{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("slug.toml");
+
+        // Cloud provider with no key in the env → not ready, with an actionable hint.
+        std::fs::write(&cfg, "[brain]\nprovider = \"claude\"\n").unwrap();
+        std::env::set_var("SLUG_CONFIG", &cfg);
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let err = brain_ready().unwrap_err();
+        assert!(err.contains("ANTHROPIC_API_KEY"), "hint should name the env var: {err}");
+        assert!(!brain_detail()["ready"].as_bool().unwrap());
+
+        // …key present → ready.
+        std::env::set_var("ANTHROPIC_API_KEY", "sk-test");
+        assert!(brain_ready().is_ok());
+        assert!(brain_detail()["ready"].as_bool().unwrap());
+        std::env::remove_var("ANTHROPIC_API_KEY");
+
+        // Local provider (ollama) is always ready — no key needed.
+        std::fs::write(&cfg, "[brain]\nprovider = \"ollama\"\n").unwrap();
+        assert!(brain_ready().is_ok());
+        assert_eq!(brain_detail()["location"], "local");
+
         std::env::remove_var("SLUG_CONFIG");
     }
 

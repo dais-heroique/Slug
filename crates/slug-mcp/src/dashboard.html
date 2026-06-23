@@ -6,15 +6,19 @@
 <title>Slug</title>
 <style>
   :root{
-    --bg:#08080b; --bg2:#0d0d12; --panel:#131319; --panel2:#0f0f15; --line:#23232d;
-    --line2:#2e2e3a; --fg:#e7e7ee; --muted:#9a9aab; --dim:#6b6b7b;
-    --accent:#7c9cff; --accent2:#a78bfa; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
-    --chip:#1a1a22;
+    --bg:#070710; --bg2:#0c0c17; --panel:#11111d; --panel2:#0d0d18; --line:#21212f;
+    --line2:#2d2d40; --fg:#ececf4; --muted:#9696ac; --dim:#64647a;
+    --accent:#8b7bff; --accent2:#22d3ee; --grad1:#7c5cff; --grad2:#22d3ee;
+    --ok:#34d399; --warn:#fbbf24; --bad:#fb6f6f; --chip:#181826;
   }
   *{box-sizing:border-box}
   html,body{height:100%}
   body{
-    margin:0; background:radial-gradient(1200px 600px at 80% -10%, #15151f 0%, var(--bg) 60%);
+    margin:0;
+    background:
+      radial-gradient(900px 500px at 88% -8%, rgba(124,92,255,.18) 0%, transparent 60%),
+      radial-gradient(800px 500px at 5% 110%, rgba(34,211,238,.12) 0%, transparent 55%),
+      var(--bg);
     color:var(--fg); font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
     display:flex; flex-direction:column; height:100vh; overflow:hidden;
   }
@@ -27,96 +31,110 @@
   .approvals .ap .txt{flex:1; color:#ffd9d5; word-break:break-word}
   .approvals .ap .age{color:var(--dim); font-size:11px}
   /* ---- top bar ---- */
-  header.topbar{flex:0 0 auto; display:flex; align-items:center; gap:14px; padding:11px 16px;
-    background:linear-gradient(180deg,#101018,#0c0c12); border-bottom:1px solid var(--line)}
-  .brand{display:flex; align-items:center; gap:9px; font-weight:700; letter-spacing:.2px}
-  .brand .logo{font-size:18px}
-  .brand .ver{color:var(--dim); font-weight:500; font-size:11px}
-  .pills{display:flex; align-items:center; gap:8px; margin-left:6px; flex-wrap:wrap}
+  header.topbar{flex:0 0 auto; display:flex; align-items:center; gap:14px; padding:12px 18px;
+    background:linear-gradient(180deg,rgba(20,20,34,.92),rgba(11,11,22,.92)); backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line)}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:.3px; font-size:16px}
+  .brand .logo{font-size:22px; filter:drop-shadow(0 0 10px rgba(124,92,255,.5))}
+  .brand .name{background:linear-gradient(90deg,var(--grad1),var(--grad2)); -webkit-background-clip:text;
+    background-clip:text; -webkit-text-fill-color:transparent}
+  .brand .ver{color:var(--dim); font-weight:500; font-size:11px; -webkit-text-fill-color:initial}
+  .brand .tag{color:var(--muted); font-weight:500; font-size:11px; margin-left:2px}
+  .pills{display:flex; align-items:center; gap:8px; margin-left:8px; flex-wrap:wrap}
   .pill{display:inline-flex; align-items:center; gap:7px; background:var(--chip);
     border:1px solid var(--line2); border-radius:999px; padding:4px 11px; font-size:12px; color:var(--fg)}
-  .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
   .dot.ok{background:var(--ok);box-shadow:0 0 8px 0 var(--ok)} .dot.bad{background:var(--bad)}
-  .dot.warn{background:var(--warn)} .pill b{font-weight:600}
+  .dot.warn{background:var(--warn);box-shadow:0 0 8px 0 var(--warn)} .pill b{font-weight:600}
   .pill .k{color:var(--muted)}
   .spacer{flex:1}
   /* ---- layout ---- */
-  main.grid{flex:1; display:grid; grid-template-columns:320px 1fr 360px; gap:12px; padding:12px; min-height:0}
-  .col{background:var(--panel); border:1px solid var(--line); border-radius:12px; display:flex;
-    flex-direction:column; min-height:0; overflow:hidden}
-  .col > h2{margin:0; font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted);
-    padding:11px 14px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px}
-  .body{padding:12px 14px; overflow:auto; min-height:0}
-  .body.tight{padding:10px}
+  main.grid{flex:1; display:grid; grid-template-columns:340px 1fr 372px; gap:14px; padding:14px; min-height:0}
+  .col{background:linear-gradient(180deg,var(--panel),var(--panel2)); border:1px solid var(--line);
+    border-radius:14px; display:flex; flex-direction:column; min-height:0; overflow:hidden;
+    box-shadow:0 8px 30px rgba(0,0,0,.35)}
+  .col > h2{margin:0; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted);
+    padding:12px 15px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px}
+  .body{padding:13px 15px; overflow:auto; min-height:0}
   /* ---- agent column ---- */
-  .card{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px}
-  .brainline{display:flex; align-items:center; gap:10px}
-  .brainbadge{font-size:22px}
-  .brainmeta{line-height:1.25}
-  .brainmeta .name{font-weight:700} .brainmeta .sub{color:var(--muted); font-size:12px}
-  .metrics{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0}
-  .tile{background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:9px 11px}
+  .card{background:var(--panel2); border:1px solid var(--line); border-radius:11px; padding:13px; margin-bottom:12px}
+  .brainline{display:flex; align-items:center; gap:11px}
+  .brainbadge{font-size:24px}
+  .brainmeta{line-height:1.3; min-width:0}
+  .brainmeta .name{font-weight:700} .brainmeta .sub{color:var(--muted); font-size:12px; word-break:break-word}
+  .readytag{margin-left:auto; font-size:10px; padding:3px 9px; border-radius:999px; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap}
+  .readytag.ok{background:#0e2a1c;color:var(--ok)} .readytag.no{background:#2a1a08;color:var(--warn)}
+  .hint{background:#16120a; border:1px solid #3a2e12; color:#ffe2ad; border-radius:10px; padding:10px 11px;
+    font-size:12px; margin-bottom:12px; line-height:1.45}
+  .hint b{color:#ffd27a} .hint a{color:var(--accent2); cursor:pointer; text-decoration:underline}
+  .metrics{display:grid; grid-template-columns:1fr 1fr; gap:9px; margin:12px 0}
+  .tile{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:10px 12px}
   .tile .k{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.04em}
-  .tile .v{font-size:18px; font-weight:700; margin-top:2px}
+  .tile .v{font-size:19px; font-weight:700; margin-top:2px}
   .tile.wide{grid-column:1/-1}
-  textarea{width:100%; min-height:74px; resize:vertical; padding:10px; background:var(--bg2);
-    color:var(--fg); border:1px solid var(--line2); border-radius:9px; font:inherit; outline:none}
-  textarea:focus,input:focus,select:focus{border-color:var(--accent)}
-  .btns{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px}
-  button{font:inherit; cursor:pointer; border-radius:9px; border:1px solid var(--line2);
+  textarea{width:100%; min-height:76px; resize:vertical; padding:11px; background:var(--bg2);
+    color:var(--fg); border:1px solid var(--line2); border-radius:10px; font:inherit; outline:none}
+  textarea:focus,input:focus,select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(124,92,255,.15)}
+  .btns{display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:10px}
+  button{font:inherit; cursor:pointer; border-radius:10px; border:1px solid var(--line2);
     background:var(--chip); color:var(--fg); padding:9px 12px; transition:.12s}
-  button:hover{border-color:var(--accent); background:#1d1d27}
-  button.primary{background:linear-gradient(180deg,#3b5bdb,#2f49b8); border-color:#4661e0; color:#fff; font-weight:600}
-  button.primary:hover{filter:brightness(1.08)}
+  button:hover{border-color:var(--accent); background:#1d1d2e}
+  button.primary{background:linear-gradient(180deg,var(--grad1),#5b3fe0); border-color:#7a5cff; color:#fff; font-weight:600;
+    box-shadow:0 4px 16px rgba(124,92,255,.35)}
+  button.primary:hover{filter:brightness(1.1)}
   button.ghost{background:transparent}
   button.span{grid-column:1/-1}
-  .statuspill{margin-left:auto; font-size:11px; padding:3px 10px; border-radius:999px; text-transform:uppercase; letter-spacing:.05em}
-  .s-idle{background:#1a1a22;color:var(--muted)} .s-running{background:#0e2a1c;color:var(--ok)}
-  .s-paused{background:#2a230e;color:var(--warn)} .s-done{background:#102338;color:var(--accent)}
-  .s-stopped,.s-error{background:#2a0f12;color:var(--bad)}
+  .statuspill{margin-left:auto; font-size:11px; padding:3px 11px; border-radius:999px; text-transform:uppercase; letter-spacing:.05em; font-weight:600}
+  .s-idle{background:#1a1a28;color:var(--muted)} .s-running{background:#0e2a1c;color:var(--ok)}
+  .s-paused{background:#2a230e;color:var(--warn)} .s-done{background:#102338;color:var(--accent2)}
+  .s-stopped{background:#241221;color:#d28bbf} .s-error{background:#2a0f12;color:var(--bad)}
   /* ---- tree ---- */
-  .toolbar{display:flex; gap:8px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--line)}
-  input.f,select{background:var(--bg2); color:var(--fg); border:1px solid var(--line2); border-radius:7px;
-    font:inherit; padding:5px 9px; outline:none}
+  .toolbar{display:flex; gap:8px; align-items:center; padding:10px 13px; border-bottom:1px solid var(--line)}
+  input.f,select{background:var(--bg2); color:var(--fg); border:1px solid var(--line2); border-radius:8px;
+    font:inherit; padding:6px 10px; outline:none}
   input.f{flex:1}
+  .seg{display:flex; gap:8px; align-items:center}
+  .chk{display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); cursor:pointer}
   .tree{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; white-space:pre; line-height:1.55}
-  .tree .role{color:var(--accent2)} .tree .nm{color:var(--fg)} .tree .ref{color:var(--ok)}
-  .tree .st{color:var(--warn)} .tree .xy{color:var(--accent)} .tree .cmt{color:var(--dim)}
+  .tree .role{color:var(--accent)} .tree .nm{color:var(--fg)} .tree .ref{color:var(--ok)}
+  .tree .st{color:var(--warn)} .tree .xy{color:var(--accent2)} .tree .cmt{color:var(--dim)}
   .empty{color:var(--dim); font-style:italic; padding:8px}
   .kv{color:var(--dim); font-size:11px; margin-left:auto}
   /* ---- tabs (side col) ---- */
-  .tabs{display:flex; gap:4px; padding:8px 10px; border-bottom:1px solid var(--line)}
-  .tab{padding:5px 11px; border-radius:8px; font-size:12px; color:var(--muted); border:1px solid transparent; cursor:pointer}
+  .tabs{display:flex; gap:4px; padding:9px 11px; border-bottom:1px solid var(--line)}
+  .tab{padding:6px 12px; border-radius:9px; font-size:12px; color:var(--muted); border:1px solid transparent; cursor:pointer}
   .tab.active{background:var(--chip); color:var(--fg); border-color:var(--line2)}
   .tab .badge{display:inline-block; min-width:16px; text-align:center; margin-left:6px; padding:0 5px;
     border-radius:999px; background:#23232d; color:var(--muted); font-size:10px}
   .pane{display:none; flex:1; min-height:0} .pane.active{display:flex; flex-direction:column}
   /* ---- log ---- */
   .log{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:1.5}
-  .log .line{padding:2px 0; border-bottom:1px solid #17171f; word-break:break-word}
-  .log .err{color:var(--bad)}
+  .log .line{padding:2px 0; border-bottom:1px solid #15151f; word-break:break-word}
+  .log .err{color:var(--bad)} .log .ok{color:var(--ok)}
   /* ---- mcp ---- */
-  .mcp-item{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid #17171f}
+  .mcp-item{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid #15151f}
   .mcp-item .nm{font-weight:600}
   .mcp-item .url{color:var(--dim); font-size:11px} .mcp-item.mono .url{font-family:ui-monospace,monospace}
   .mcp-item .x{margin-left:auto; color:var(--dim); border:none; background:none; padding:4px 8px}
   .mcp-item .x:hover{color:var(--bad)}
   .stat{font-size:11px; padding:2px 8px; border-radius:999px}
-  .stat.self{background:#102338;color:var(--accent)} .stat.reachable{background:#0e2a1c;color:var(--ok)}
+  .stat.self{background:#102338;color:var(--accent2)} .stat.reachable{background:#0e2a1c;color:var(--ok)}
   .stat.unreachable{background:#2a0f12;color:var(--bad)} .stat.command{background:#23232d;color:var(--muted)}
   .addform{display:grid; grid-template-columns:1fr; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line)}
   .addform .row{display:flex; gap:8px} .addform input{flex:1}
   /* ---- apps ---- */
-  .app-item{padding:7px 0; border-bottom:1px solid #17171f; display:flex; gap:8px; align-items:center}
+  .app-item{padding:7px 0; border-bottom:1px solid #15151f; display:flex; gap:8px; align-items:center}
   .app-item .nm{font-weight:600} .app-item .bus{color:var(--dim); font-size:11px; margin-left:auto}
-  .note{color:var(--dim); font-size:11px; padding:8px 14px; border-top:1px solid var(--line)}
+  .note{color:var(--dim); font-size:11px; padding:9px 15px; border-top:1px solid var(--line)}
   /* ---- providers ---- */
-  .prov{padding:10px 0; border-bottom:1px solid #17171f}
-  .prov.on{background:#0d1726; border:1px solid #1d3350; border-radius:9px; padding:10px; margin:4px 0}
+  .prov{padding:10px 0; border-bottom:1px solid #15151f}
+  .prov.on{background:#0e1726; border:1px solid #1d3350; border-radius:10px; padding:11px; margin:4px 0}
   .prow{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
   .prow2{display:flex; gap:7px; margin-top:8px; flex-wrap:wrap}
   .prov .pm{max-width:190px} .prov .pk{flex:1; min-width:140px}
+  .sectlabel{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
   ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:#23232d;border-radius:8px}
+  ::-webkit-scrollbar-thumb:hover{background:#2d2d40}
 </style>
 </head>
 <body>
@@ -124,8 +142,9 @@
 <div id="approvals" class="approvals" hidden></div>
 
 <header class="topbar">
-  <div class="brand"><span class="logo">🐌</span> Slug <span class="ver" id="ver"></span>
-    <span class="ver" style="margin-left:8px">· by Thibault Dufour</span></div>
+  <div class="brand"><span class="logo">🐇</span> <span class="name">Slug</span>
+    <span class="ver" id="ver"></span>
+    <span class="tag">· fast as a rabbit · by Thibault Dufour</span></div>
   <div class="pills">
     <span class="pill" id="brainPill"><span class="dot" id="brainDot"></span><span class="k">brain</span> <b id="brainName">…</b></span>
     <span class="pill" id="clientPill"><span class="dot" id="clientDot"></span><b id="clientTxt">no client</b></span>
@@ -138,13 +157,20 @@
 <main class="grid">
   <!-- LEFT: agent control -->
   <section class="col">
-    <h2>Agent <span class="statuspill s-idle" id="statusPill">idle</span></h2>
+    <h2>Built-in agent <span class="statuspill s-idle" id="statusPill">idle</span></h2>
     <div class="body">
       <div class="card">
         <div class="brainline">
           <span class="brainbadge" id="brainEmoji">🧠</span>
           <div class="brainmeta"><div class="name" id="brainName2">—</div><div class="sub" id="brainSub">—</div></div>
+          <span class="readytag no" id="readyTag">—</span>
         </div>
+      </div>
+      <div class="hint" id="brainHint" hidden></div>
+      <div class="hint" id="clientHint" hidden style="background:#0c1726;border-color:#1d3350;color:#bfe0ff">
+        ✅ <b>A client is driving Slug</b> over MCP (e.g. Claude Code in your terminal).
+        Type your tasks <b>there</b> — it controls Slug directly. The box below runs Slug's
+        <i>own</i> built-in agent instead, which needs its own API key.
       </div>
       <div class="metrics">
         <div class="tile"><div class="k">steps</div><div class="v" id="mSteps">0</div></div>
@@ -153,7 +179,7 @@
         <div class="tile"><div class="k">cost</div><div class="v" id="mCost">$0.00</div></div>
         <div class="tile wide"><div class="k">task</div><div class="v" id="mTask" style="font-size:13px;font-weight:500;word-break:break-word">—</div></div>
       </div>
-      <textarea id="taskInput" placeholder="Tell Slug what to do, e.g. 'Open Safari on chess.com and play 1.e4'…"></textarea>
+      <textarea id="taskInput" placeholder="Tell Slug's built-in agent what to do, e.g. 'Open Safari on chess.com and play 1.e4'… (⌘/Ctrl+Enter to start)"></textarea>
       <div class="btns">
         <button class="primary span" onclick="startTask()">▶ Start task</button>
         <button class="ghost" onclick="ctl('slug_agent_pause')">⏸ Pause</button>
@@ -168,14 +194,17 @@
     <h2>Semantic view <span class="kv" id="treeAge"></span></h2>
     <div class="toolbar">
       <input id="filter" class="f" placeholder="filter the tree…" oninput="renderTree()" />
-      <select id="scope" onchange="refreshTree(true)">
-        <option value="focused" selected>focused</option>
-        <option value="window">window</option>
-        <option value="desktop">desktop</option>
-      </select>
+      <div class="seg">
+        <select id="scope" onchange="refreshTree(true)">
+          <option value="focused" selected>focused window</option>
+          <option value="window">window</option>
+          <option value="desktop">all screens</option>
+        </select>
+        <label class="chk"><input type="checkbox" id="interactiveOnly" onchange="refreshTree(true)"/> clickable only</label>
+      </div>
     </div>
     <div class="body" style="flex:1"><div id="tree" class="tree"><span class="empty">loading…</span></div><div id="opaque"></div></div>
-    <div class="note">Slug never captures pixels — this is the same structured text the agent reads.</div>
+    <div class="note">Slug never captures pixels — this is the same structured text the agent reads. <b>“all screens”</b> spans every monitor (coordinates are global).</div>
   </section>
 
   <!-- RIGHT: tabs -->
@@ -188,7 +217,7 @@
     </div>
     <div class="pane active" id="pane-log"><div class="body log" id="log"><span class="empty">no activity yet</span></div></div>
     <div class="pane" id="pane-brain"><div class="body">
-      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Connect an AI provider (API)</div>
+      <div class="sectlabel">Connect an AI provider (API)</div>
       <div id="providers"><span class="empty">…</span></div>
       <div class="note" style="border:none;padding:8px 0 0">A key you paste is saved to <span class="mono">~/.slug/secrets.env</span> (owner-only, 0600) so you don't re-enter it after a restart — never in <span class="mono">slug.toml</span>. Leave it blank to use an env var you already set.</div>
     </div></div>
@@ -196,7 +225,7 @@
       <div class="body">
         <div id="mcpList"><span class="empty">…</span></div>
         <div class="addform">
-          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Add a custom MCP server</div>
+          <div class="sectlabel">Add a custom MCP server</div>
           <input id="mcpName" class="f" placeholder="name (e.g. github)" />
           <div class="row">
             <input id="mcpUrl" class="f" placeholder="http://127.0.0.1:9000/mcp" />
@@ -211,8 +240,8 @@
 </main>
 
 <script>
-let rpcId=0, mcpOk=false, busOk=false, lastStatus='idle', treeText='', treeAt=0, appsAt=0;
-const TREE_TTL=1500;
+let rpcId=0, mcpOk=false, lastStatus='idle', treeText='', treeAt=0, appsAt=0, clientConnected=false;
+const TREE_TTL=1200;
 
 async function callTool(name, args={}){
   const r = await fetch('/mcp',{method:'POST',headers:{'content-type':'application/json'},
@@ -228,24 +257,36 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 function fmtNum(n){return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':String(n);}
 function fmtDur(s){if(!s)return '–';const m=Math.floor(s/60),x=s%60;return m?`${m}m ${x}s`:`${x}s`;}
 function setDot(id,cls){const e=document.getElementById(id);e.className='dot'+(cls?' '+cls:'');}
+function providerLabel(p,local){return local?('Local · '+p):(p==='claude'?'Claude (Anthropic)':(p||'cloud'));}
 
-// ---------- header info: brain (Claude/local) + client + version ----------
+// ---------- header info: brain + client + version ----------
 async function refreshInfo(){
   try{
     const i=await jget('/info');
     document.getElementById('ver').textContent='v'+(i.version||'');
     const b=i.brain||{};
     const local=b.location==='local';
-    const label = local ? ('Local · '+(b.provider||'?')) :
-      (b.provider==='claude'?'Claude':(b.provider||'cloud'));
+    const label=providerLabel(b.provider,local);
     document.getElementById('brainName').textContent=label;
-    setDot('brainDot', b.provider?'ok':'warn');
+    setDot('brainDot', b.ready?'ok':'warn');
     document.getElementById('brainEmoji').textContent= local?'💻':'☁️';
     document.getElementById('brainName2').textContent=label;
-    document.getElementById('brainSub').textContent=(b.model||'')+(local?' (on this machine)':' (cloud API)');
+    document.getElementById('brainSub').textContent=(b.model||'')+(local?' · on this machine':' · cloud API');
+    // ready badge + actionable hint
+    const rt=document.getElementById('readyTag');
+    rt.textContent=b.ready?'ready':'no key';
+    rt.className='readytag '+(b.ready?'ok':'no');
+    const hint=document.getElementById('brainHint');
+    if(b.ready){ hint.hidden=true; }
+    else{ hint.hidden=false;
+      hint.innerHTML=`⚠ The built-in agent has <b>no API key</b>${b.key_env?` (<span class="mono">${esc(b.key_env)}</span>)`:''}. `+
+        `Open the <a onclick="showTab('brain')">Brain tab</a> and Connect a provider, or use a connected MCP client to drive Slug.`;
+    }
     const c=i.client||{};
+    clientConnected=!!c.connected;
     document.getElementById('clientTxt').textContent=c.connected?'MCP client connected':'no client';
     setDot('clientDot', c.connected?'ok':'');
+    document.getElementById('clientHint').hidden=!(c.connected && !b.ready);
   }catch(e){}
 }
 
@@ -263,17 +304,20 @@ async function refreshStatus(){
     document.getElementById('mCost').textContent='$'+(s.cost_usd||0).toFixed(4);
     document.getElementById('mElapsed').textContent=s.elapsed_s?fmtDur(s.elapsed_s):'–';
     document.getElementById('mTask').textContent=s.task||'—';
-    // live brain overrides config when a task is running
     if(s.provider){
       const local=(s.provider==='ollama');
-      const label=local?('Local · '+s.provider):(s.provider==='claude'?'Claude':s.provider);
+      const label=providerLabel(s.provider,local);
       document.getElementById('brainName').textContent=label;
       document.getElementById('brainName2').textContent=label;
       document.getElementById('brainSub').textContent=(s.model||'')+(s.tier?(' · '+s.tier):'');
     }
     const log=document.getElementById('log');
     if(s.log&&s.log.length){
-      log.innerHTML=s.log.map(l=>`<div class="line${/\[ERROR\]|error/i.test(l)?' err':''}">${esc(l)}</div>`).join('');
+      log.innerHTML=s.log.map(l=>{
+        const cls=/✗|\[ERROR\]|error/i.test(l)?' err':(/^✓/.test(l)?' ok':'');
+        return `<div class="line${cls}">${esc(l)}</div>`;
+      }).join('');
+      log.scrollTop=log.scrollHeight;
     }
     setDot('busDot','ok'); document.getElementById('busTxt').textContent='perception';
   }catch(e){ setDot('busDot','bad'); document.getElementById('busTxt').textContent='offline'; }
@@ -284,8 +328,10 @@ async function refreshStatus(){
 async function refreshTree(force){
   if(!force && Date.now()-treeAt<TREE_TTL) return;
   const scope=document.getElementById('scope').value;
+  const args={scope};
+  if(document.getElementById('interactiveOnly').checked) args.interactive_only=true;
   try{
-    const {text}=await callTool('slug_snapshot',{scope});
+    const {text}=await callTool('slug_snapshot',args);
     treeText=text; treeAt=Date.now(); renderTree();
   }catch(e){ document.getElementById('tree').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
 }
@@ -326,7 +372,6 @@ async function refreshApps(){
 async function refreshMcp(){
   try{
     const j=await jget('/mcp-servers'); const servers=j.servers||[];
-    const custom=servers.filter(s=>s.kind!=='self').length;
     const reachable=servers.filter(s=>s.status==='reachable'||s.status==='serving').length;
     document.getElementById('mcpCount').textContent=reachable;
     document.getElementById('mcpBadge').textContent=servers.length;
@@ -384,9 +429,9 @@ async function refreshProviders(){
     const j=await jget('/providers'); const ps=j.providers||[];
     window._prov={}; ps.forEach(p=>window._prov[p.id]=p);
     document.getElementById('providers').innerHTML=ps.map(p=>{
-      const kindcls=p.kind==='local'?'command':(p.kind==='gateway'?'self':'self');
+      const kindcls=p.kind==='local'?'command':'self';
       const keyTag=p.key_env?(p.key_present?'<span class="stat reachable">key set</span>':`<span class="stat unreachable">set $${esc(p.key_env)}</span>`):'<span class="stat command">no key</span>';
-      const keyInput=p.key_env?`<input class="f pk" data-id="${esc(p.id)}" type="password" placeholder="paste key (session only, optional)"/>`:'';
+      const keyInput=p.key_env?`<input class="f pk" data-id="${esc(p.id)}" type="password" placeholder="paste key (saved securely, optional)"/>`:'';
       return `<div class="prov ${p.active?'on':''}">
         <div class="prow"><b>${esc(p.label)}</b> <span class="stat ${kindcls}">${esc(p.kind)}</span> ${keyTag} ${p.active?'<span class="stat reachable">active</span>':''}</div>
         <div class="prow2">
@@ -427,9 +472,12 @@ async function startTask(){
   refreshStatus();
 }
 async function ctl(name){ try{ await callTool(name); }catch(e){} refreshStatus(); }
+document.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key==='Enter'&&document.activeElement===document.getElementById('taskInput')) startTask();
+});
 
 // ---------- loop ----------
-function tick(){ return lastStatus==='running'?900:3000; }
+function tick(){ return lastStatus==='running'?800:2500; }
 async function loop(){
   if(!document.hidden){
     await refreshStatus(); refreshApprovals();
