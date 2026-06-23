@@ -123,7 +123,8 @@ fn initialize_result() -> Value {
             maps); (4) verify with another filtered slug_snapshot. slug_wait_for is \
             unreliable on real apps — after an action just snapshot again rather than \
             waiting. Prefer slug_invoke on a ref over coordinates when a node exists; \
-            refs are per-snapshot, never reuse old ones."
+            refs are per-snapshot, never reuse old ones. Call slug_help any time for a \
+            compact cheat-sheet of all commands."
     })
 }
 
@@ -323,6 +324,13 @@ pub fn tool_definitions() -> Vec<Value> {
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         }),
         json!({
+            "name": "slug_help",
+            "description": "Return a short cheat-sheet of how to drive Slug efficiently \
+                (workflow, fast filtered search, acting, gotchas). Call once if unsure — it \
+                is cheap and self-contained.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }),
+        json!({
             "name": "slug_agent_start_task",
             "description": "Start the slug-brain agent on a natural-language task. Drives \
                 the UI autonomously via the same tools (observe→reason→act→verify).",
@@ -414,6 +422,7 @@ async fn handle_tool_call(
         "slug_key" => tool_key(session, &args).await,
         "slug_wait_for" => tool_wait_for(session, &args).await,
         "slug_list_apps" => tool_list_apps(session).await,
+        "slug_help" => Ok(help_text()),
         name if name.starts_with("slug_agent_") => match control {
             Some(ctrl) => agent_tool(ctrl, name, &args).await,
             None => Err("agent control is not available on this transport".into()),
@@ -447,6 +456,33 @@ async fn agent_tool(
         "slug_agent_stop" => ctrl.stop().await,
         other => Err(format!("unknown agent tool: {other}")),
     }
+}
+
+/// A compact, self-contained cheat-sheet returned by `slug_help` — so any
+/// connected agent can learn the commands cheaply (on demand), regardless of
+/// transport or whether the client surfaces the `initialize` instructions.
+fn help_text() -> String {
+    "SLUG — drive native apps by reading the OS accessibility tree as text (never \
+screenshots).\n\
+WORKFLOW: slug_launch (open app) → slug_snapshot (read) → slug_invoke (act on a \
+ref) → slug_snapshot again to verify.\n\
+FIND FAST (saves tokens — don't pull the whole tree): \
+slug_snapshot {scope:\"focused\", roles:[…], filter:\"text\", limit:1}. \
+roles take exact names (button, entry, static_text, link…) OR groups \
+(clickable, field, text, link, heading). Returns only matches as `role \"name\" \
+[ref]`; exact-name match ranks first, so limit:1 gives the one you meant. Add \
+coords:true to also get @x,y.\n\
+ACT: slug_invoke {ref, action:\"click\"|\"set_text\"|\"set_value\"|\"focus\"|\"toggle\"|…, \
+args, reasoning}. Forms: set_text every field, then click submit last.\n\
+NO ACCESSIBLE TREE (canvas/games): slug_click {x,y}, slug_scroll {x,y,dy} (dy<0 = \
+down), slug_key {keys:\"cmd+s\"} or {keys:\"hello\", mode:\"text\"}. Get x,y from a \
+snapshot (coords:true); never invent them.\n\
+OTHER: slug_launch {name, uri?} (uri jumps straight to a page/state); \
+slug_list_apps. slug_wait_for often times out — prefer snapshotting again.\n\
+RULES: refs change whenever the UI changes — re-snapshot, never reuse old refs. \
+Destructive actions (delete/send/buy/submit) may pause for human approval in the \
+dashboard. Prefer slug_invoke on a ref over raw coordinates."
+        .to_string()
 }
 
 /// Build a `tools/call` result object with a single text content block.
@@ -489,6 +525,7 @@ async fn tool_snapshot(session: &Arc<Session>, args: &Value) -> std::result::Res
         coords: args.get("coords").and_then(Value::as_bool).unwrap_or(false),
     };
 
+    let active = filter.is_active();
     let out = session.snapshot_filtered(scope, &filter).await.map_err(|e| e.to_string())?;
     let mut text = out.yaml;
     if !out.opaque.is_empty() {
@@ -496,6 +533,14 @@ async fn tool_snapshot(session: &Arc<Session>, args: &Value) -> std::result::Res
         for c in &out.opaque {
             text.push_str(&format!("#   - {} ({:?})\n", c.app_id, c.opaque.unwrap()));
         }
+    }
+    // If an unfiltered snapshot came back large, nudge the agent to filter next
+    // time — this keeps any client token-efficient without it reading the docs.
+    if !active && text.len() > 8_000 {
+        text.push_str(
+            "\n# tip: large result — to save tokens, narrow it: \
+             slug_snapshot {roles:[\"button\"|\"field\"|…], filter:\"text\", limit:1}\n",
+        );
     }
     Ok(text)
 }

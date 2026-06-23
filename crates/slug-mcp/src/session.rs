@@ -74,7 +74,7 @@ impl SnapshotFilter {
 pub enum SessionError {
     #[error("not connected to the AT-SPI accessibility bus: {0}")]
     NotConnected(String),
-    #[error("unknown ref alias: {0}")]
+    #[error("unknown ref alias '{0}' — refs change whenever the UI changes; re-run slug_snapshot to get fresh refs, then retry")]
     UnknownAlias(String),
     #[error(transparent)]
     Bridge(#[from] slug_bridge::BridgeError),
