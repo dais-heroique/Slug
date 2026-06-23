@@ -113,7 +113,7 @@ costs you nothing.
 | Toggle a checkbox/switch | `toggle` | — |
 | Expand/collapse a tree item/combo | `expand` | — |
 | Select a list/menu option | `select` | — |
-| Any other named AT-SPI/UIA action | that name verbatim | as needed |
+| Any other named accessibility action | that name verbatim | as needed |
 
 Result text tells you what happened:
 - `ok: <action> on <ref> succeeded` → done.
@@ -136,7 +136,7 @@ Pattern for "open Spotify and play my playlist": `slug_launch {name:"Spotify"}` 
 ```
 Synthetic left click at absolute screen coordinates — for clicking where there is
 no accessible node (opaque apps, canvas). When a node IS accessible, prefer
-`slug_invoke <ref> click` (more robust). macOS + Windows; Linux via xdotool/ydotool.
+`slug_invoke <ref> click` (more robust). macOS + Windows.
 
 ### `slug_scroll` — reveal off-screen content
 ```json
@@ -161,11 +161,7 @@ tokens** (it injects an OS event, never a screenshot).
 
 Pattern for an opaque app: bring it to the front / focus its field if you can,
 then `slug_key`. For shortcuts in any app: just `slug_key {keys:"cmd+s"}`.
-(Implemented in-process on macOS + Windows. On Linux, Wayland blocks in-process
-injection, so Slug shells out to **`xdotool`** (X11/XWayland — full support) or
-**`ydotool`** (Wayland — text + click); if neither is installed it returns a clear
-error telling you to install one or use the semantic path. `cmd` maps to `ctrl`
-on Linux.)
+(Implemented in-process on macOS and Windows.)
 
 ### `slug_wait_for`
 ```json
@@ -340,9 +336,9 @@ no nodes anyway, so a full snapshot tells you nothing a filtered one doesn't.
 
 - **Transports:** stdio (Claude Code) or HTTP (`/mcp`); dashboard at
   `http://127.0.0.1:7333/dashboard` when running HTTP.
-- **Permissions:** Linux needs toolkit-accessibility on; Windows needs none; macOS
-  needs Accessibility granted to the *specific binary* running Slug (the launchd
-  daemon `~/.slug/bin/slug-mcp` for the dashboard, or your terminal for stdio).
+- **Permissions:** Windows needs none; macOS needs Accessibility granted to the
+  *specific binary* running Slug (the launchd daemon `~/.slug/bin/slug-mcp` for the
+  dashboard, or your terminal for stdio).
 - If a snapshot errors with *"permission denied / AXIsProcessTrusted returned
   false / not connected"*, it's an OS permission problem, **not** something you can
   fix with more tool calls — report it and the fix (grant Accessibility, restart).

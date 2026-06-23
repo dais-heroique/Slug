@@ -10,42 +10,40 @@ description of every button, field and menu (the same data screen readers use) �
 and lets the agent act on those elements directly. The result is faster, cheaper
 and more reliable than vision-based "computer use".
 
-It is **not** an operating system: it installs on top of your existing macOS,
-Windows or Linux like any other app (a `.dmg`, an `.exe` installer, or a tarball).
+It is **not** an operating system: it installs on top of your existing **macOS or
+Windows** like any other app (a `.dmg` or an `.exe` installer).
 Under the hood it exposes the accessibility layer as an **MCP server**, so you can
 connect Claude Code (or any MCP client) and have it read and drive native apps; it
 also bundles a multi-provider agent loop (`slug-brain`), a built-in control
 dashboard, and synthetic keyboard/mouse/scroll input. (The longer-term design
 vision behind this approach is in [`docs/`](./docs).)
 
-Slug runs on all three desktops; only the perception/action layer differs per OS:
+Slug runs on **macOS and Windows**; only the perception/action layer differs per OS:
 
 | OS | Accessibility source | Permissions |
 |----|----------------------|-------------|
-| **Linux** | AT-SPI2 over D-Bus | enable toolkit accessibility |
-| **Windows** | UI Automation (`IUIAutomation`) | none |
 | **macOS** | Accessibility API (`AXUIElement`) | grant Accessibility permission |
+| **Windows** | UI Automation (`IUIAutomation`) | none |
 
 Only the platform perception/action layer (`slug-bridge`) differs per OS; the
 semantic model (`slug-core`), the MCP server (`slug-mcp`), and the agent
-(`slug-brain`) are identical everywhere. See [Platform backends](#platform-backends).
+(`slug-brain`) are identical on both. See [Platform backends](#platform-backends).
 
-> Slug works through the OS accessibility APIs (AT-SPI2 / UI Automation / AX), not
-> a custom compositor. Two documented adaptations of the original design spec apply
-> (see [Design adaptations](#milestone-1-adaptations)).
+> Slug works through the OS accessibility APIs (UI Automation / AX), not a custom
+> layer of its own.
 
 ## Workspace layout
 
 | Crate         | Role |
 |---------------|------|
 | `slug-core`   | The unified semantic document model — a faithful Rust mirror of [`docs/SEMANTIC-SCHEMA.md`](./docs/SEMANTIC-SCHEMA.md): `SlugNode`, `SlugRole`, `SlugState`, `SlugDelta`, stable refs, the document arena, and the Playwright-MCP-style YAML serializer. Depends only on `serde`. |
-| `slug-bridge` | The cross-platform accessibility harvester. One `AccessibilityBackend` trait with three implementations — `backend_atspi` (Linux/AT-SPI2), `backend_uia` (Windows/UI Automation), `backend_ax` (macOS/AX) — selected per `cfg(target_os)`. Walks application trees, maps native roles/states to Slug, executes actions, and flags opaque (vision-fallback) apps. |
+| `slug-bridge` | The accessibility harvester. One `AccessibilityBackend` trait with a backend per OS — `backend_ax` (macOS/AX) and `backend_uia` (Windows/UI Automation) — selected per `cfg(target_os)`. Walks application trees, maps native roles/states to Slug, executes actions, and flags opaque apps. |
 | `slug-mcp`    | The MCP server: JSON-RPC 2.0 over **stdio** and **streamable HTTP**, exposing the perception/action and agent-control tools (see [Tools](#tools)). This is the session layer that maps internal ULID refs to short agent-facing aliases (`b1`, `e5`), and it enforces the destructive-action [approval gate](#safety) for external clients. |
 | `slug-cli`    | A `slug` binary for driving the bus by hand (snapshot, list apps, invoke actions, stream live events). |
 | `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools. **Multi-provider**: Claude, OpenAI/OpenRouter/any OpenAI-compatible server, Gemini, or local Ollama — chosen in `slug.toml` or auto-selected from detected hardware. See [Providers](#providers-multi-provider-brain). |
 
 ```
-agent ──MCP──► slug-mcp ──► slug-bridge ──AT-SPI2 / UIA / AX──► applications
+agent ──MCP──► slug-mcp ──► slug-bridge ──UI Automation / AX──► applications
                   │              │
                   └─ slug-core (SlugNode / SlugDocument / SlugDelta) ─┘
 ```
@@ -66,37 +64,20 @@ trait AccessibilityBackend {
 
 | Backend | `cfg` | Walk | Actions | Native node id (§4) |
 |---------|-------|------|---------|---------------------|
-| `backend_atspi` | `target_os = "linux"` | `AccessibleProxy.GetChildren` | `DoAction` / `SetTextContents` / `SetCurrentValue` / `GrabFocus` | `{bus_name}:{path}` |
-| `backend_uia` | `target_os = "windows"` | `ControlViewWalker` | `Invoke` / `Value` / `Toggle` / `SelectionItem` / `ExpandCollapse` / `ScrollItem` / `SetFocus` patterns | stringified `RuntimeId` |
 | `backend_ax` | `target_os = "macos"` | `kAXChildrenAttribute` | `AXUIElementPerformAction(kAXPress)` / `AXUIElementSetAttributeValue` | hash of `{pid}:{ax_tree_path}` |
+| `backend_uia` | `target_os = "windows"` | `ControlViewWalker` | `Invoke` / `Value` / `Toggle` / `SelectionItem` / `ExpandCollapse` / `ScrollItem` / `SetFocus` patterns | stringified `RuntimeId` |
 
 Each backend hashes its native id into the schema's ULID via
 `slug_core::derive_ref`, and `slug-mcp` maps that to short aliases (`b1`, `e5`) —
-the agent's view is identical on every OS.
+the agent's view is identical on both OSes.
 
-**Live events** (`SlugDelta`/`SlugEvent` streaming) are wired on Linux. On Windows
-(`Add*EventHandler` COM sinks) and macOS (`AXObserver` notifications) the live
-stream is a documented follow-up; **snapshot + invoke — the semantic-first core —
-are implemented on all three**. The Windows and macOS backends are compile-verified
-in [CI](.github/workflows/ci.yml) on `windows-latest` / `macos-latest`.
+The agent and dashboard read state by snapshotting (and re-snapshotting after each
+action); `slug_wait_for` surfaces live UI events where the backend provides them.
 
 ## Prerequisites
 
-- Rust 1.77.2+ (`rustup`).
+- Rust 1.77.2+ (`rustup`) — only if you build from source.
 - A graphical desktop session, plus the per-OS setup below.
-
-### Linux (AT-SPI2)
-
-- The **AT-SPI2 accessibility bus** running and the system D-Bus available
-  (`libdbus`). Present on most desktops.
-- Accessibility enabled so toolkits expose their trees:
-  ```sh
-  gsettings set org.gnome.desktop.interface toolkit-accessibility true
-  ```
-  Firefox additionally needs `ACCESSIBILITY_ENABLED=1` (or an active screen
-  reader) to publish its tree. `slug-bridge` also calls the AT-SPI
-  `set_session_accessibility(true)` hint on connect.
-- **Good first targets:** gnome-text-editor, Files (Nautilus), Firefox.
 
 ### Windows (UI Automation)
 
@@ -140,14 +121,6 @@ in **[INSTALL.md](./INSTALL.md)**.
 3. Open <http://127.0.0.1:7333/dashboard>. No extra OS permission is required.
    Uninstall from **Apps & features** like any program.
 
-### Linux — tarball
-```sh
-tar -xzf slug-*-linux-x86_64.tar.gz && cd slug-*-linux-x86_64
-gsettings set org.gnome.desktop.interface toolkit-accessibility true   # expose trees
-SLUG_AGENT_BIN="$PWD/slug-agent" ./slug-mcp --http 127.0.0.1:7333       # then open the dashboard
-```
-For synthetic input also `sudo apt install xdotool` (or `ydotool` on Wayland).
-
 > **Connecting an AI** to drive Slug (e.g. Claude Code over MCP) is optional and
 > covered in [Connect Claude Code](#connect-claude-code) and [INSTALL.md](./INSTALL.md).
 
@@ -160,8 +133,8 @@ cargo build --workspace --release
 # binaries: target/release/{slug-mcp, slug, slug-agent}  (.exe on Windows)
 ```
 
-The same command builds on Linux, Windows, and macOS — the correct accessibility
-backend is selected automatically per target. CI compiles all three on every push.
+The same command builds on macOS and Windows — the correct accessibility
+backend is selected automatically per target. CI compiles both on every push.
 
 Run the tests (unit + MCP protocol integration tests; no desktop needed):
 
@@ -173,7 +146,7 @@ cargo test --workspace
 
 The release artifacts are produced by CI ([`.github/workflows/release.yml`](.github/workflows/release.yml))
 — push a tag like `v0.1.0`, or run the workflow manually (**Actions → Release →
-Run workflow**) to get the `.dmg`, `SlugSetup.exe`, and tarballs as downloads. To
+Run workflow**) to get the `.dmg` and `SlugSetup.exe` as downloads. To
 build them by hand:
 
 ```sh
@@ -210,7 +183,7 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 | Tool | Input | Result |
 |------|-------|--------|
 | `slug_snapshot` | `{ "scope": "focused" \| "window" \| "desktop", "filter"?: "…", "roles"?: ["button"], "interactive_only"?: bool, "limit"?: 50 }` | The UI as a Playwright-style YAML tree; each node has a short `[ref=…]`. With `filter`/`roles`/`interactive_only` it returns a compact **flat list** of just the matching nodes (each with `ref` + centre `@x,y`) — a server-side "grep" so you don't ship the whole tree. |
-| `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named AT-SPI action. |
+| `slug_invoke` | `{ "ref": "b1", "action": "click", "args"?: "…", "reasoning"?: "…" }` | Performs `activate`/`click`/`press`, `focus`, `set_text`, `set_value`, or any named accessibility action. |
 | `slug_launch` | `{ "name": "Spotify", "uri"?: "spotify:playlist:…" }` | **Launch** an app by name (and optionally open a URI / deep link). Slug otherwise only drives already-running apps. See [Controlling any app](#controlling-any-app-launch-keyboard-mouse). |
 | `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. |
 | `slug_click` | `{ "x": 640, "y": 360, "reasoning"?: "…" }` | Synthetic left mouse click at absolute screen coordinates — click **anywhere**, including opaque apps. No pixels. |
@@ -240,7 +213,7 @@ The name *snapshot* means a **point-in-time read of the semantic document**, in 
 database sense — not an image. A `slug_snapshot` returns text (YAML): for each
 element its **role, name, state, and `ref`**. There is **no image, pixel buffer,
 screen capture, or OCR anywhere in the pipeline** — the bridge reads the OS
-accessibility tree (AT-SPI2 / UIA / AX) directly, and the agent acts on `ref`s.
+accessibility tree (UI Automation / AX) directly, and the agent acts on `ref`s.
 
 This is the whole thesis: the agent perceives structured meaning, not pixels.
 It's cheaper, deterministic, and legible — the [control dashboard](#mcp-native-control-dashboard)
@@ -313,15 +286,7 @@ without the cost and storage of images.
 
 Implemented in-process on **macOS** (Quartz `CGEvent`; needs Accessibility — and on
 recent macOS, Input Monitoring — permission) and **Windows** (`SendInput`; no
-special permission). On **Linux**, Wayland blocks in-process injection by design,
-so Slug shells out to a system input tool when one is installed: **`xdotool`**
-(X11/XWayland — full support: keys, text, click, scroll) or **`ydotool`** (Wayland
-— text + click). If neither is present, `slug_key`/`slug_click`/`slug_scroll`
-return a clear, explained tool error (never a crash); the semantic path
-(`slug_snapshot`/`slug_invoke`) needs no injection and remains fully functional on
-Linux. The macOS and Windows synthetic paths are compile-verified on their target
-triples and need a real-hardware smoke test, as with the rest of the per-OS
-backends.
+special permission).
 
 ### Snapshot latency
 
@@ -333,11 +298,11 @@ the entire accessibility tree each time. `desktop` scope still harvests everythi
 
 ## Connect Claude Code
 
-Point Claude Code at the built binary over stdio. The command is identical on
-every OS — only the binary path differs (`slug-mcp.exe` on Windows):
+Point Claude Code at the built binary over stdio. The command is the same on both
+OSes — only the binary path differs (`slug-mcp.exe` on Windows):
 
 ```sh
-# Linux / macOS
+# macOS
 claude mcp add slug -- /absolute/path/to/target/release/slug-mcp --stdio
 
 # Windows (PowerShell)
@@ -345,8 +310,8 @@ claude mcp add slug -- C:\path\to\target\release\slug-mcp.exe --stdio
 ```
 
 On macOS, grant the launching process (your terminal, or Claude Code) Accessibility
-permission first (see [Prerequisites](#macos-accessibility--ax)); on Windows no
-permission is needed; on Linux ensure toolkit accessibility is enabled.
+permission first (see [Prerequisites](#prerequisites)); on Windows no permission is
+needed.
 
 Or, from a checkout, via cargo:
 
@@ -395,24 +360,13 @@ fresh desktop snapshot first to (re)build the alias table.
 Live/runtime tests are gated behind the **`live-tests`** feature so default
 `cargo test` and CI never try to run them without a desktop.
 
-A cross-platform smoke test (`live_smoke`) connects the active backend, enumerates
-apps, snapshots, and renders the agent-facing YAML — run it on any OS:
+A smoke test (`live_smoke`) connects the active backend, enumerates apps,
+snapshots, and renders the agent-facing YAML:
 
 ```sh
-# Linux: gsettings set org.gnome.desktop.interface toolkit-accessibility true
 # macOS: grant Accessibility permission to your terminal first
 cargo test -p slug-bridge --features live-tests --test live_smoke -- --ignored --nocapture
 ```
-
-A richer Linux end-to-end test drives gnome-text-editor on a live AT-SPI2 bus:
-
-```sh
-gsettings set org.gnome.desktop.interface toolkit-accessibility true
-cargo test -p slug-bridge --features live-tests --test e2e_gnome_text_editor -- --ignored --nocapture
-```
-
-It launches the editor, harvests its tree, asserts it is non-trivial and
-non-opaque, renders the agent-facing YAML, and focuses a button.
 
 ## Agent (slug-brain)
 
@@ -587,27 +541,18 @@ Builds the Rust binaries (a few MB — **no models are downloaded**), writes a
 starter `~/.slug/slug.toml` (defaulting to `ollama` if detected, else `claude`),
 and registers a launchd agent that runs `slug-mcp --http` at login with the
 dashboard (and sets `SLUG_DESTRUCTIVE=ask`). On Windows use
-`powershell -ExecutionPolicy Bypass -File .\slug-install\install.ps1`; on Linux run
-the daemon directly or via a systemd `--user` unit. See [INSTALL.md](./INSTALL.md)
-and [`slug-install/README.md`](./slug-install/README.md).
+`powershell -ExecutionPolicy Bypass -File .\slug-install\install.ps1`. See
+[INSTALL.md](./INSTALL.md) and [`slug-install/README.md`](./slug-install/README.md).
 
-## Milestone-1 adaptations
+## Design notes
 
-The canonical spec assumes a Wayland compositor. On the AT-SPI2 path we make two
-documented deviations (and stub one security feature):
-
-1. **Refs.** The stable `ref` is still a 128-bit, ULID-shaped, Crockford-Base32
-   string (`docs/SEMANTIC-SCHEMA.md` §4.3), but at M1 it is **derived
-   deterministically** from the AT-SPI identity `{unique_bus_name}:{accessible_path}`
-   rather than minted by a compositor. The ULID is the internal identity; the
-   agent only ever sees short **session aliases** (`b1`, `e5`) mapped 1:1 to
-   ULIDs in `slug-mcp`. YAML snapshots and all MCP tools use aliases exclusively.
-2. **Deltas.** `SlugDelta` / `SlugEvent` frames are produced from AT-SPI2 signals
-   (`StateChanged`, `ChildrenChanged`, focus) instead of Wayland frame commits.
-   The wire format is exactly the §5.2 format.
-3. **Capability token** (§5.4) is **stubbed** — security is Milestone 5
-   (see [`docs/RISK-REGISTER.md`](./docs/RISK-REGISTER.md)). The gate is wired
-   through `SlugDocument::snapshot` so only the validation body changes later.
+- **Refs.** Each node's stable `ref` is a 128-bit, ULID-shaped, Crockford-Base32
+  string, derived deterministically from the native accessibility identity (the AX
+  element path on macOS, the UIA `RuntimeId` on Windows). The ULID is internal; the
+  agent only ever sees short **session aliases** (`b1`, `e5`) mapped 1:1 to ULIDs
+  in `slug-mcp`. YAML snapshots and all MCP tools use aliases exclusively.
+- **Deltas.** `SlugDelta` / `SlugEvent` frames carry UI changes in a stable wire
+  format, independent of the OS that produced them.
 
 ## Author
 

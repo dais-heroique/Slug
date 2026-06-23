@@ -21,7 +21,6 @@ Go to the repository's **Releases** page and download the file for your system:
 | **macOS (binaries)** | `slug-<ver>-macos-*.tar.gz` | Binaries + `install.sh` |
 | **Windows (installer)** | `SlugSetup-<ver>-windows-x86_64.exe` | One-click **installer** (recommended) |
 | **Windows (zip)** | `slug-<ver>-windows-x86_64.zip` | Binaries + `install.ps1` |
-| **Linux** | `slug-<ver>-linux-x86_64.tar.gz` | Binaries + `install.sh` |
 
 ### macOS (.dmg / Slug.app)
 1. Open the **`.dmg`** and drag **Slug.app** onto **Applications** (or unzip the
@@ -55,26 +54,8 @@ registers the logon daemon, and offers to open the dashboard. Uninstall from
    No special permission is required on Windows.
 3. Open <http://127.0.0.1:7333/dashboard>.
 
-### Linux
-```sh
-tar -xzf slug-*-linux-x86_64.tar.gz && cd slug-*-linux-x86_64
-SLUG_AGENT_BIN="$PWD/slug-agent" ./slug-mcp --http 127.0.0.1:7333
-```
-
 > macOS binary tarball: clear quarantine first —
 > `xattr -dr com.apple.quarantine slug-mcp slug slug-agent`.
-Enable toolkit accessibility so apps expose their trees:
-```sh
-gsettings set org.gnome.desktop.interface toolkit-accessibility true
-```
-For **synthetic input** (`slug_click` / `slug_key` / `slug_scroll`), install an
-input tool — Wayland blocks in-process injection, so Slug shells out to one:
-```sh
-sudo apt install xdotool      # X11 / XWayland — full support (keys, text, click, scroll)
-# or, on a pure-Wayland session: sudo apt install ydotool   # text + click (needs the ydotoold daemon)
-```
-Reading the UI and `slug_invoke` on a ref need neither — they work regardless.
-Then open <http://127.0.0.1:7333/dashboard>.
 
 ---
 
@@ -94,8 +75,6 @@ Then install/run per OS:
   launchd agent, starts the daemon). Build a double-click app with
   `./slug-install/make-macos-app.sh` → `dist/Slug.app`.
 - **Windows:** `powershell -ExecutionPolicy Bypass -File .\slug-install\install.ps1`.
-- **Linux:** run the daemon directly (see above); a systemd `--user` unit is the
-  natural equivalent of the macOS launchd agent.
 
 ---
 
@@ -105,7 +84,7 @@ The dashboard already lets you start tasks. To also drive Slug from **Claude Cod
 over MCP (stdio):
 
 ```sh
-# macOS / Linux
+# macOS
 claude mcp add slug -- ~/.slug/bin/slug-mcp --stdio
 # Windows (PowerShell)
 claude mcp add slug -- $env:USERPROFILE\.slug\bin\slug-mcp.exe --stdio
@@ -118,21 +97,28 @@ path, exactly as for Slug.app.)
 
 ## Choosing the AI provider
 
-Edit `~/.slug/slug.toml` (Windows: `%USERPROFILE%\.slug\slug.toml`):
+The easiest way is the **Brain tab in the dashboard**: pick a provider — Anthropic
+(Claude), Google Gemini, OpenRouter, OpenAI, Groq, Mistral, DeepSeek, xAI (Grok),
+Together, Perplexity, or local Ollama — set the model, and click Connect. You can
+**paste your API key there**; it is saved to `~/.slug/secrets.env` (owner-only,
+`0600`) so you don't re-enter it after a restart, and is **never written to
+`slug.toml`**.
+
+Equivalently, edit `~/.slug/slug.toml` (Windows: `%USERPROFILE%\.slug\slug.toml`):
 
 ```toml
 [brain]
-provider = "claude"   # auto | claude | openai | openrouter | gemini | ollama
+provider = "claude"   # claude | openai | openrouter | gemini | ollama | auto
 
 [providers.claude]
 api_key_env = "ANTHROPIC_API_KEY"
 model = "claude-sonnet-4-6"
 ```
 
-API keys are read from the **environment variable named in the config** — they are
-never stored in the file. Set it in your shell (macOS/Linux `export …`, Windows
-`setx ANTHROPIC_API_KEY "sk-..."`). With `provider = "ollama"`, Slug uses your
-local Ollama models (nothing is downloaded by Slug).
+API keys are read from the **environment variable named in the config** (or from
+the `secrets.env` above) — never stored in `slug.toml`. You can also export it in
+your shell (macOS `export …`, Windows `setx ANTHROPIC_API_KEY "sk-..."`). With
+`provider = "ollama"`, Slug uses your local Ollama models (nothing is downloaded).
 
 ---
 
@@ -147,7 +133,6 @@ local Ollama models (nothing is downloaded by Slug).
 - **macOS:** `./slug-install/install.sh uninstall` (or delete `Slug.app` + `~/.slug`).
 - **Windows:** uninstall **Slug** from *Apps & features* (installer build), or
   `powershell -File .\slug-install\install.ps1 -Uninstall` (zip build).
-- **Linux:** stop the daemon and remove the extracted folder / `~/.slug`.
 
 ---
 

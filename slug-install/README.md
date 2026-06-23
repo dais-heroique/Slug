@@ -58,12 +58,3 @@ cargo build --release -p slug-mcp -p slug-cli -p slug-brain
 ```
 
 Dashboard: `http://127.0.0.1:7333/dashboard`.
-
-## Linux (manual)
-
-```sh
-cargo build --release -p slug-mcp -p slug-cli -p slug-brain
-SLUG_AGENT_BIN=$PWD/target/release/slug-agent ./target/release/slug-mcp --http 127.0.0.1:7333
-```
-
-(A systemd `--user` unit is the natural equivalent of the macOS launchd agent.)
