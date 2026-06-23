@@ -61,10 +61,11 @@ Slug. Say so plainly instead of trying.
 ### `slug_snapshot`
 ```json
 { "scope": "focused" | "window" | "desktop",      // default: "window"
-  "filter": "basket",                              // optional: substring on names
-  "roles": ["button", "entry"],                    // optional: keep only these roles
+  "filter": "send",                                // optional: substring on names
+  "roles": ["button"],                             // optional: exact roles OR a group
   "interactive_only": true,                        // optional: drop static text/containers
-  "limit": 50 }                                    // optional: cap (default 50)
+  "limit": 1,                                      // optional: cap (default 50)
+  "coords": false }                                // optional: add @x,y to every match
 ```
 - `focused` / `window` → the focused top-level window (small, fast — your default).
 - `desktop` → every running app (use only to locate an app or its window).
@@ -72,27 +73,34 @@ Slug. Say so plainly instead of trying.
 **The fast path — filter server-side, don't pull the whole tree.** A real web
 page is tens of thousands of characters; reading it all is what makes you slow.
 When you're looking for *a specific control*, pass `filter` / `roles` /
-`interactive_only`. The snapshot then returns a **compact flat list of only the
-matching nodes**, each already carrying its `[ref=…]` **and** a centre `@x,y`:
+`interactive_only`. The snapshot returns a **compact, lean flat list of only the
+matching nodes** (just `role "name" [ref] [states]` — no coordinates on normal
+controls, so it's as small as possible):
 
 ```
-- button "Add to Basket" [ref=b7] @812,540
-- entry "Search" [ref=i1] [focused] @640,80
+- button "Send" [ref=b7]
+- button "Send later" [ref=b9]
 # … 3 more matched; raise 'limit' or refine 'filter'/'roles' …
 ```
 
-That single line is everything you need to act — `slug_invoke b7 click`, or
-`slug_click 812,540` if invoke fails. This replaces the old "snapshot the whole
-tree, then grep it" loop: the grep now happens **inside** the server.
+Then act — `slug_invoke b7 click`. Matches are **ranked: an exact name match comes
+first**, so `limit: 1` returns the single control you meant.
 
-Common filters:
-- a button by label → `{ "roles": ["button"], "filter": "send" }`
-- all text fields → `{ "roles": ["entry", "combo_box", "entry_search", "entry_multiline"] }`
-- just the actionable controls → `{ "interactive_only": true }`
+Precise filters:
+- a button by label → `{ "roles": ["button"], "filter": "send", "limit": 1 }`
+- any text field → `{ "roles": ["field"] }`  (group: entries/combos/spinners)
+- any actionable control → `{ "roles": ["clickable"] }`  (or `"interactive_only": true`)
+- a link / heading → `{ "roles": ["link"] }` / `{ "roles": ["heading"], "filter": "inbox" }`
 - read a move list / labels → `{ "roles": ["static_text"], "limit": 200 }`
+- need to `slug_click` by coordinate → add `"coords": true` (opaque surfaces always
+  print `@x,y`; normal controls only when you ask).
 
-Omit all of them only when you genuinely need the *structure* (hierarchy) of the
-window. `roles` values are the lower-case role names exactly as printed in a
+**Role groups** (besides exact role names like `button`, `entry`, `static_text`):
+`clickable` = any actionable control, `field`/`input` = text entries/combos/spinners,
+`text` = static text/labels/headings, `link`, `heading`.
+
+Omit all filters only when you genuinely need the *structure* (hierarchy) of the
+window. Exact `roles` values are the lower-case role names exactly as printed in a
 snapshot (`button`, `entry`, `link`, `heading`, `static_text`, `combo_box`, …).
 
 ### `slug_invoke`

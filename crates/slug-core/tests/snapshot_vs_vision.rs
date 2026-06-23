@@ -189,6 +189,7 @@ fn snapshot_sizes(plies: usize) -> (usize, usize, usize) {
         &["static_text".to_string()],
         false,
         500,
+        false,
     );
     (doc.len(), full.len(), moves.len())
 }

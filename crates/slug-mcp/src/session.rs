@@ -49,6 +49,9 @@ pub struct SnapshotFilter {
     pub interactive_only: bool,
     /// Cap on emitted nodes (defaults to [`SnapshotFilter::DEFAULT_LIMIT`]).
     pub limit: Option<usize>,
+    /// Include centre `@x,y` on every match (default: only opaque surfaces, to
+    /// keep the result lean — normal controls are clicked by `ref`).
+    pub coords: bool,
 }
 
 impl SnapshotFilter {
@@ -409,6 +412,7 @@ fn render(doc: &SlugDocument, aliases: &AliasTable, filter: &SnapshotFilter) -> 
             &filter.roles,
             filter.interactive_only,
             filter.limit(),
+            filter.coords,
         )
     } else {
         doc.to_yaml(aliases)

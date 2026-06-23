@@ -164,9 +164,13 @@ pub fn tool_definitions() -> Vec<Value> {
                     "roles": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Keep only these roles, lower-case as shown in \
-                            snapshots, e.g. [\"button\"], [\"entry\",\"combo_box\"], \
-                            [\"static_text\"], [\"link\",\"heading\"]. Combine with filter."
+                        "description": "Keep only these roles — exact lower-case role names \
+                            (e.g. [\"button\"], [\"entry\"], [\"static_text\"], [\"link\"]) \
+                            or a friendly GROUP: \"clickable\" (any actionable control), \
+                            \"field\"/\"input\" (text entries, combos, spinners), \"text\" \
+                            (static text/labels/headings), \"link\", \"heading\". \
+                            Searching for a button? pass roles:[\"button\"] and you get ONLY \
+                            buttons. Combine with filter."
                     },
                     "interactive_only": {
                         "type": "boolean",
@@ -177,7 +181,17 @@ pub fn tool_definitions() -> Vec<Value> {
                         "type": "integer",
                         "minimum": 1,
                         "default": 50,
-                        "description": "Max nodes returned in filtered mode (default 50)."
+                        "description": "Max nodes returned in filtered mode (default 50). \
+                            Set limit:1 with a filter to get just the single best match — \
+                            results are ranked so an exact name match comes first."
+                    },
+                    "coords": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include each match's centre @x,y. Off by default to \
+                            stay lean (you click normal controls by ref); turn on when you \
+                            need a slug_click fallback. Opaque surfaces (canvas/image) always \
+                            include @x,y."
                     }
                 },
                 "additionalProperties": false
@@ -472,6 +486,7 @@ async fn tool_snapshot(session: &Arc<Session>, args: &Value) -> std::result::Res
             .get("limit")
             .and_then(Value::as_u64)
             .map(|n| n.max(1) as usize),
+        coords: args.get("coords").and_then(Value::as_bool).unwrap_or(false),
     };
 
     let out = session.snapshot_filtered(scope, &filter).await.map_err(|e| e.to_string())?;
