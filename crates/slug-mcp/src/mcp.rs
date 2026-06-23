@@ -148,14 +148,23 @@ pub fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "app": {
+                        "type": "string",
+                        "description": "Snapshot THIS app by name (e.g. 'Notes', 'Spotify'), \
+                            regardless of OS focus. USE THIS when you drive Slug from another \
+                            window (e.g. a terminal): 'focused' reflects the OS-frontmost window, \
+                            which is often your own client, not the app you mean. Matched \
+                            case-insensitively. Overrides 'scope'."
+                    },
                     "scope": {
                         "type": "string",
                         "enum": ["focused", "window", "desktop"],
-                        "description": "focused/window = the focused top-level window (fastest, \
-                            prefer this); desktop = every running application across ALL monitors. \
-                            Coordinates are global screen space, so @x,y from any scope works on a \
-                            multi-monitor setup (a window on a second screen may have large or \
-                            negative x — that is normal, pass it through to slug_click as-is).",
+                        "description": "focused/window = the OS-frontmost top-level window (fast, \
+                            but it is whatever the OS focused — may be your controlling client; \
+                            prefer the 'app' param to target a specific app); desktop = every \
+                            running application across ALL monitors. Coordinates are global screen \
+                            space, so @x,y from any scope works on a multi-monitor setup (a window \
+                            on a second screen may have large or negative x — normal, pass as-is).",
                         "default": "window"
                     },
                     "filter": {
@@ -521,8 +530,11 @@ fn help_text() -> String {
 screenshots).\n\
 WORKFLOW: slug_launch (open app) → slug_snapshot (read) → slug_invoke (act on a \
 ref) → slug_snapshot again to verify.\n\
+TARGET THE RIGHT APP: if you drive Slug from another window (e.g. a terminal), \
+scope:\"focused\" reads the OS-frontmost window (often your own client), so pass \
+app:\"Notes\" to snapshot a specific app regardless of focus.\n\
 FIND FAST (saves tokens — don't pull the whole tree): \
-slug_snapshot {scope:\"focused\", roles:[…], filter:\"text\", limit:1}. \
+slug_snapshot {app:\"Safari\", roles:[…], filter:\"text\", limit:1}. \
 roles take exact names (button, entry, static_text, link…) OR groups \
 (clickable, field, text, link, heading). Returns only matches as `role \"name\" \
 [ref]`; exact-name match ranks first, so limit:1 gives the one you meant. Add \
@@ -587,7 +599,13 @@ async fn tool_snapshot(session: &Arc<Session>, args: &Value) -> std::result::Res
     };
 
     let active = filter.is_active();
-    let out = session.snapshot_filtered(scope, &filter).await.map_err(|e| e.to_string())?;
+    // Target a specific app by name when given — focus-independent, so it reads the
+    // right app even though the controlling client holds OS focus.
+    let app = args.get("app").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    let out = match app {
+        Some(app) => session.snapshot_app(app, &filter).await.map_err(|e| e.to_string())?,
+        None => session.snapshot_filtered(scope, &filter).await.map_err(|e| e.to_string())?,
+    };
     let mut text = out.yaml;
     if !out.opaque.is_empty() {
         text.push_str("\n# opaque apps (no/flat accessibility tree — vision fallback):\n");

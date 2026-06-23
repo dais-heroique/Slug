@@ -180,6 +180,32 @@ impl Session {
         self.snapshot_filtered(scope, &SnapshotFilter::default()).await
     }
 
+    /// Snapshot a specific application **by name**, independent of which window the
+    /// OS currently has focused. This is the reliable way to read an app you are
+    /// driving from another window (the controlling client steals OS focus between
+    /// calls, so `scope:"focused"` would otherwise read the wrong app).
+    pub async fn snapshot_app(
+        self: &Arc<Self>,
+        app: &str,
+        filter: &SnapshotFilter,
+    ) -> Result<SnapshotOutput> {
+        let bridge = self.ensure_bridge().await?;
+        let harvested = bridge.snapshot_app(app).await?;
+        let opaque = harvested.opaque.clone();
+        let mut state = self.state.lock().await;
+        state.document = harvested.document;
+        let scoped = state.document.clone();
+        for node in scoped.bfs_order() {
+            state.aliases.assign(&node.slug_ref, node.role);
+        }
+        let yaml = render(&scoped, &state.aliases, filter);
+        drop(state);
+        // Don't write the scope cache (it's keyed by scope, not app name); a stale
+        // app doc must never be served for a later focused/desktop read.
+        *self.cache.lock().await = None;
+        Ok(SnapshotOutput { yaml, opaque })
+    }
+
     /// Produce a snapshot for `scope`, optionally narrowed by `filter`.
     ///
     /// When `filter.is_active()`, the result is a compact **flat list** of only

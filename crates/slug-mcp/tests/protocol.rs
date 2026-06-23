@@ -107,6 +107,29 @@ async fn snapshot_tool_advertises_server_side_filter() {
 }
 
 #[tokio::test]
+async fn snapshot_advertises_app_targeting_to_beat_focus_theft() {
+    // The model must be able to discover the focus-independent `app` param (the fix
+    // for "scope:focused always returns my own window").
+    let session = Session::new();
+    let resp = handle(&session, req(50, "tools/list", json!({}))).await.expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    let tools = v["result"]["tools"].as_array().unwrap();
+    let snap = tools.iter().find(|t| t["name"] == "slug_snapshot").unwrap();
+    assert!(snap["inputSchema"]["properties"]["app"].is_object(), "app param missing");
+
+    // Calling it by app name still needs the bus → clean isError, not a panic.
+    let resp = handle(
+        &session,
+        req(51, "tools/call", json!({ "name": "slug_snapshot", "arguments": { "app": "Notes" } })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null());
+    assert_eq!(v["result"]["isError"], true);
+}
+
+#[tokio::test]
 async fn filtered_snapshot_without_bus_is_an_iserror_result() {
     // A filtered snapshot still needs the bus; it must fail as an isError tool
     // result (not a protocol error), exactly like an unfiltered one.

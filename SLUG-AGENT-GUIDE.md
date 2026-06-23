@@ -60,15 +60,21 @@ Slug. Say so plainly instead of trying.
 
 ### `slug_snapshot`
 ```json
-{ "scope": "focused" | "window" | "desktop",      // default: "window"
+{ "app": "Notes",                                  // optional: target an app by name
+  "scope": "focused" | "window" | "desktop",      // default: "window"
   "filter": "send",                                // optional: substring on names
   "roles": ["button"],                             // optional: exact roles OR a group
   "interactive_only": true,                        // optional: drop static text/containers
   "limit": 1,                                      // optional: cap (default 50)
   "coords": false }                                // optional: add @x,y to every match
 ```
-- `focused` / `window` → the focused top-level window (small, fast — your default).
-- `desktop` → every running app (use only to locate an app or its window).
+- **`app` (use this when you drive Slug from a terminal/another window).**
+  `scope:"focused"` reads whatever the OS has frontmost — which keeps snapping
+  *back to your own client window* between calls. Pass `app:"Safari"` to snapshot a
+  specific app regardless of focus. Matched case-insensitively; overrides `scope`.
+- `focused` / `window` → the OS-frontmost top-level window (small, fast — but it's
+  whatever the OS focused; prefer `app` to be sure you read the right one).
+- `desktop` → every running app across all monitors (use to locate an app/window).
 
 **The fast path — filter server-side, don't pull the whole tree.** A real web
 page is tens of thousands of characters; reading it all is what makes you slow.
@@ -342,6 +348,22 @@ no nodes anyway, so a full snapshot tells you nothing a filtered one doesn't.
 4. slug_snapshot { roles: ["button"], filter: "send" } → slug_invoke click
    (or { filter: "save" } / Esc to leave a draft)
 ```
+
+### Known OS limitations (don't fight these — work around them)
+Some macOS apps expose little or no accessibility tree. These are OS facts, not
+Slug bugs; the workaround is always the same — drive them with synthetic input
+(`slug_key` / `slug_click` / `slug_sequence`) instead of reading nodes.
+
+| App / kind | What you'll see | How to drive it |
+|---|---|---|
+| **Spotify** | `generic "Spotify"`, no children/coords | Keyboard only: `slug_key {keys:"space", activate:"Spotify"}` (play/pause), `cmd+right` (next). Or `slug_launch Spotify uri=spotify:…` to jump to content. |
+| **Notes body** | a `WKWebView` — you can **write** into it but the text isn't read back via AX | Type with `slug_sequence`; verify by other means (don't expect to read the body back). |
+| **Chess.app** (native) | no AX tree, no usable AppleScript | Not drivable. Use **chess.com in Safari** instead (canvas board → click by coords, read the move list via `roles:["static_text"]`). |
+| **Electron/Chromium apps** (e.g. ChatGPT Atlas, Claude desktop) | labelled `generic` but actually rich | Not opaque — snapshot with `app:"<name>"`; the content is in `entry`/`entry_multiline` nodes. Don't trust the `generic` top label, look inside. |
+
+Rule of thumb: a top-level `generic` with **no children** is genuinely opaque
+(keyboard/coords only); a `generic` **with** children is just an unlabelled
+container — keep reading into it.
 
 ---
 

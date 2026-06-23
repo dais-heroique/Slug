@@ -137,19 +137,26 @@ impl Bridge {
         self.snapshot_desktop().await
     }
 
-    /// Harvest a single application by name / native id / ref.
+    /// Harvest a single application by name / native id / ref. The `app_key` is
+    /// matched against the app's localized name case-insensitively (exact first,
+    /// then substring), or against its native id / derived ref — so `"notes"`
+    /// finds `"Notes"`. This is focus-independent: it snapshots the named app even
+    /// when another window (e.g. the controlling client) is frontmost.
     #[instrument(skip(self))]
     pub async fn snapshot_app(&self, app_key: &str) -> Result<SnapshotResult> {
         let apps = self.backend.enumerate_apps().await?;
+        let want = app_key.trim().to_ascii_lowercase();
         let app = apps
-            .into_iter()
+            .iter()
             .find(|a| {
                 a.backend_node_id == app_key
-                    || a.app_id == app_key
                     || derive_ref(&a.backend_node_id) == app_key
+                    || a.app_id.to_ascii_lowercase() == want
             })
+            .or_else(|| apps.iter().find(|a| a.app_id.to_ascii_lowercase().contains(&want)))
+            .cloned()
             .ok_or_else(|| BridgeError::UnknownRef(app_key.to_string()))?;
-        self.snapshot_apps(&[app]).await
+        self.snapshot_apps(std::slice::from_ref(&app)).await
     }
 
     /// Snapshot a set of apps into one document, recording known refs + coverage.
