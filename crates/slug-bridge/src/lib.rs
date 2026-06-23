@@ -29,6 +29,7 @@
 
 pub mod action;
 pub mod backend;
+pub mod click_flash;
 pub mod coverage;
 pub mod error;
 pub mod launch;
@@ -218,6 +219,11 @@ impl Bridge {
         }
         info!(action = %action.id(), "synth_input");
         self.backend.synth_input(&action).await?;
+        // Optional visual feedback: briefly flash a red dot where we clicked
+        // (opt-in via SLUG_CLICK_FLASH; no-op otherwise). Best-effort, isolated.
+        if let Action::MouseClick { x, y } = action {
+            crate::click_flash::flash(x, y);
+        }
         Ok(true)
     }
 

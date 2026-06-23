@@ -100,6 +100,8 @@ setx SLUG_AGENT_BIN (Join-Path $BinDir "slug-agent.exe") | Out-Null
 setx SLUG_CONFIG $Config | Out-Null
 # Destructive actions from external clients: ask (approve in dashboard) | deny | allow
 if (-not $env:SLUG_DESTRUCTIVE) { setx SLUG_DESTRUCTIVE "ask" | Out-Null }
+# Flash a red dot where Slug clicks (1 = on, 0 = off)
+if (-not $env:SLUG_CLICK_FLASH) { setx SLUG_CLICK_FLASH "1" | Out-Null }
 $env:SLUG_AGENT_BIN = Join-Path $BinDir "slug-agent.exe"
 $env:SLUG_CONFIG = $Config
 if (-not $env:SLUG_DESTRUCTIVE) { $env:SLUG_DESTRUCTIVE = "ask" }

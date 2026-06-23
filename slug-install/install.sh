@@ -128,6 +128,8 @@ cat > "$PLIST" <<EOF
     <key>RUST_LOG</key><string>slug_mcp=info,slug_brain=info,slug_bridge=info</string>
     <!-- Destructive actions from external clients: ask (approve in the dashboard) | deny | allow -->
     <key>SLUG_DESTRUCTIVE</key><string>ask</string>
+    <!-- Flash a red dot where Slug clicks (1 = on, 0 = off) -->
+    <key>SLUG_CLICK_FLASH</key><string>1</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

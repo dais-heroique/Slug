@@ -36,6 +36,8 @@ export SLUG_AGENT_BIN="$DIR/slug-agent"
 export RUST_LOG="${RUST_LOG:-slug_mcp=info,slug_brain=info,slug_bridge=info}"
 # Gate destructive actions behind dashboard approval by default.
 export SLUG_DESTRUCTIVE="${SLUG_DESTRUCTIVE:-ask}"
+# Flash a red dot where Slug clicks (set to 0 to disable).
+export SLUG_CLICK_FLASH="${SLUG_CLICK_FLASH:-1}"
 # Honour a user config if one exists (e.g. from a prior install or hand-edit).
 [ -f "$HOME/.slug/slug.toml" ] && export SLUG_CONFIG="$HOME/.slug/slug.toml"
 LOG_DIR="$HOME/Library/Logs/slug"; mkdir -p "$LOG_DIR"

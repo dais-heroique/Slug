@@ -288,6 +288,11 @@ Implemented in-process on **macOS** (Quartz `CGEvent`; needs Accessibility — a
 recent macOS, Input Monitoring — permission) and **Windows** (`SendInput`; no
 special permission).
 
+**Click feedback.** So you can *see* what Slug does, it briefly flashes a small red
+dot on screen (~2 s) where it clicks. It's drawn by a detached helper (so it can't
+slow or crash anything) and is **on by default in the packaged app** — set
+`SLUG_CLICK_FLASH=0` to turn it off (or `=1` to enable it for a manual run).
+
 ### Snapshot latency
 
 `focused`/`window` snapshots deep-walk only the **frontmost application** (via the
