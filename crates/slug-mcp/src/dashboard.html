@@ -30,6 +30,16 @@
   .approvals .ap{display:flex; align-items:center; gap:10px; font-size:13px}
   .approvals .ap .txt{flex:1; color:#ffd9d5; word-break:break-word}
   .approvals .ap .age{color:var(--dim); font-size:11px}
+  /* ---- connection / permission banner ---- */
+  .connbar{display:flex; align-items:center; gap:13px; padding:11px 16px; flex:0 0 auto;
+    background:linear-gradient(90deg,#1a1405,#140f04); border-bottom:1px solid #7a5a12}
+  .connbar .cb-icon{font-size:20px}
+  .connbar .cb-title{font-weight:700; color:#ffd27a; font-size:13px}
+  .connbar .cb-text{color:#f0dcb0; font-size:12px; line-height:1.45} .connbar .cb-text b{color:#ffe6bd}
+  .connbar .cb-body{flex:1; min-width:0}
+  .connbar .cb-btn{background:linear-gradient(180deg,#caa23e,#a9831f); border:1px solid #caa23e; color:#1a1405;
+    font-weight:700; white-space:nowrap; border-radius:9px; padding:9px 13px}
+  .connbar .cb-btn:hover{filter:brightness(1.08)}
   /* ---- top bar ---- */
   header.topbar{flex:0 0 auto; display:flex; align-items:center; gap:14px; padding:12px 18px;
     background:linear-gradient(180deg,rgba(20,20,34,.92),rgba(11,11,22,.92)); backdrop-filter:blur(8px);
@@ -140,6 +150,17 @@
 <body>
 
 <div id="approvals" class="approvals" hidden></div>
+
+<div id="connBanner" class="connbar" hidden>
+  <div class="cb-icon">🔒</div>
+  <div class="cb-body">
+    <div class="cb-title">Accessibility permission needed</div>
+    <div class="cb-text">Slug can't read the screen's structure yet. Grant it once:
+      <b>System Settings → Privacy &amp; Security → Accessibility</b> → turn on
+      <b>Slug</b> (or the app running it), then it connects automatically — no restart of this page needed.</div>
+  </div>
+  <button class="cb-btn" onclick="openAxSettings()">Open settings</button>
+</div>
 
 <header class="topbar">
   <div class="brand"><span class="logo">🐇</span> <span class="name">Slug</span>
@@ -325,15 +346,31 @@ async function refreshStatus(){
 }
 
 // ---------- semantic tree ----------
+function isPermErr(m){ return /permission|not connected|AXIsProcessTrusted|accessibility/i.test(m||''); }
+function setConnBanner(show){ document.getElementById('connBanner').hidden=!show; }
+function openAxSettings(){
+  // Deep-link straight to the Accessibility pane (macOS); harmless elsewhere.
+  window.open('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility','_blank');
+}
 async function refreshTree(force){
   if(!force && Date.now()-treeAt<TREE_TTL) return;
   const scope=document.getElementById('scope').value;
   const args={scope};
   if(document.getElementById('interactiveOnly').checked) args.interactive_only=true;
   try{
-    const {text}=await callTool('slug_snapshot',args);
+    const {text,isError}=await callTool('slug_snapshot',args);
+    if(isError && isPermErr(text)){
+      setConnBanner(true);
+      document.getElementById('tree').innerHTML='<span class="empty">waiting for Accessibility permission…</span>';
+      return;
+    }
+    setConnBanner(false);
     treeText=text; treeAt=Date.now(); renderTree();
-  }catch(e){ document.getElementById('tree').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
+  }catch(e){
+    if(isPermErr(e.message)){ setConnBanner(true);
+      document.getElementById('tree').innerHTML='<span class="empty">waiting for Accessibility permission…</span>'; }
+    else document.getElementById('tree').innerHTML='<span class="empty">'+esc(e.message)+'</span>';
+  }
 }
 function renderTree(){
   const q=(document.getElementById('filter').value||'').toLowerCase();
