@@ -33,6 +33,7 @@ pub mod click_flash;
 pub mod coverage;
 pub mod error;
 pub mod launch;
+pub mod activate;
 
 #[cfg(target_os = "linux")]
 pub mod backend_atspi;
@@ -232,6 +233,14 @@ impl Bridge {
     pub async fn launch_app(&self, name: &str, uri: Option<&str>) -> Result<()> {
         info!(name, uri = uri.unwrap_or(""), "launch_app");
         crate::launch::launch(name, uri)
+    }
+
+    /// Bring an already-running application to the foreground (keyboard focus), so
+    /// synthetic input sent right after lands in *it* and not in whatever window
+    /// the controlling client lives in. See [`crate::activate`].
+    pub async fn activate_app(&self, name: &str) -> Result<()> {
+        info!(name, "activate_app");
+        crate::activate::activate(name)
     }
 
     /// Subscribe to live semantic events. The subscription is kept alive for the

@@ -171,6 +171,29 @@ Pattern for an opaque app: bring it to the front / focus its field if you can,
 then `slug_key`. For shortcuts in any app: just `slug_key {keys:"cmd+s"}`.
 (Implemented in-process on macOS and Windows.)
 
+> **Focus gotcha (read this for games / web apps).** If you drive Slug from
+> another window (e.g. Claude Code in a terminal), keyboard focus returns to that
+> window *between* tool calls — so a `slug_key` on the next call can land in the
+> terminal instead of the game. Two fixes:
+> - `slug_key`/`slug_click` accept `activate: "Safari"` (+ optional `settle_ms`):
+>   they foreground that app in the **same** call before sending input.
+> - For a multi-key move, use **`slug_sequence`** — it runs everything in one
+>   atomic call so nothing can steal focus mid-way (this is what makes typing into
+>   another app reliable, the native equivalent of one `osascript` command).
+
+### `slug_activate` / `slug_sequence` — beat focus theft
+```json
+{ "app": "Safari", "settle_ms": 150 }                       // slug_activate
+{ "steps": [ {"activate":"Safari"}, {"wait_ms":200},
+             {"text":"crane"}, {"key":"return"} ] }          // slug_sequence
+```
+`slug_activate` just brings an app to the front. `slug_sequence` runs an ordered
+list of steps with **no return to the client in between**, so focus can't be
+stolen. Step kinds: `{activate:"App"}`, `{focus:"ref"}`, `{click:"ref"}`,
+`{click_xy:[x,y]}`, `{key:"return"}`, `{text:"hello"}`, `{wait_ms:200}`.
+Example — play a Wordle guess in one call: `[{activate:"Safari"},{wait_ms:200},
+{text:"crane"},{key:"return"}]`.
+
 ### `slug_wait_for`
 ```json
 { "event_type": "focus_changed", "timeout_ms": 5000 }

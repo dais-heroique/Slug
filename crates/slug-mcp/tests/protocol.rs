@@ -36,7 +36,7 @@ async fn tools_list_exposes_the_perception_and_agent_tools() {
     // The four perception/action tools …
     for expected in [
         "slug_snapshot", "slug_invoke", "slug_launch", "slug_click", "slug_scroll",
-        "slug_key", "slug_wait_for", "slug_list_apps",
+        "slug_key", "slug_activate", "slug_sequence", "slug_wait_for", "slug_list_apps",
     ] {
         assert!(names.contains(&expected), "missing tool {expected}");
     }
@@ -127,6 +127,58 @@ async fn filtered_snapshot_without_bus_is_an_iserror_result() {
     let v = serde_json::to_value(&resp).unwrap();
     assert!(v["error"].is_null(), "must not be a protocol error");
     assert_eq!(v["result"]["isError"], true);
+}
+
+#[tokio::test]
+async fn sequence_rejects_an_empty_step_list_as_a_protocol_error_free_iserror() {
+    // A malformed sequence (no steps) is a clean isError tool result, never a panic
+    // or protocol error — the contract every tool follows.
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(40, "tools/call", json!({ "name": "slug_sequence", "arguments": { "steps": [] } })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null(), "must not be a protocol error");
+    assert_eq!(v["result"]["isError"], true);
+    assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("empty"));
+}
+
+#[tokio::test]
+async fn sequence_with_a_wait_only_step_runs_without_a_bus() {
+    // A {wait_ms} step needs neither the bus nor focus, so a wait-only sequence
+    // succeeds end to end — proving steps execute in-process, atomically.
+    let session = Session::new();
+    let resp = handle(
+        &session,
+        req(
+            41,
+            "tools/call",
+            json!({ "name": "slug_sequence", "arguments": { "steps": [ { "wait_ms": 1 } ] } }),
+        ),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null());
+    assert_eq!(v["result"]["isError"], false);
+    assert!(v["result"]["content"][0]["text"].as_str().unwrap().contains("ran 1 steps"));
+}
+
+#[tokio::test]
+async fn sequence_advertises_the_atomic_focus_fix() {
+    // The model must be able to discover that slug_sequence is the atomic combo
+    // that prevents focus theft.
+    let session = Session::new();
+    let resp = handle(&session, req(42, "tools/list", json!({}))).await.expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    let tools = v["result"]["tools"].as_array().unwrap();
+    let seq = tools.iter().find(|t| t["name"] == "slug_sequence").unwrap();
+    let desc = seq["description"].as_str().unwrap();
+    assert!(desc.contains("atomic") && desc.contains("focus"), "sequence must explain the fix");
+    assert_eq!(seq["inputSchema"]["properties"]["steps"]["type"], "array");
 }
 
 #[tokio::test]

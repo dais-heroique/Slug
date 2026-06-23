@@ -254,6 +254,7 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "x": { "type": "number", "description": "Absolute screen X." },
                     "y": { "type": "number", "description": "Absolute screen Y." },
+                    "activate": { "type": "string", "description": "Optional app name to bring to the front FIRST (same call), so the click lands in it and not in the client's window." },
                     "reasoning": { "type": "string", "description": "Why (logged)." }
                 },
                 "required": ["x", "y"],
@@ -283,10 +284,13 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "slug_key",
             "description": "Send synthetic keyboard input to the focused app — a key \
                 chord (mode=chord, e.g. 'cmd+s', 'return', 'shift+tab', 'down') or \
-                literal text (mode=text). This drives ANY app, including opaque ones \
-                with no accessibility tree, and still captures NO pixels: it injects \
-                an OS input event, not a node action. Optionally focus a node first \
-                via 'ref'. (macOS implemented; Linux/Windows: follow-up.)",
+                literal text (mode=text). Drives ANY app, including opaque ones with \
+                no accessibility tree, capturing NO pixels (it injects an OS input \
+                event). IMPORTANT: if you are driving Slug from another window (e.g. a \
+                terminal), keyboard focus returns to THAT window between tool calls, so \
+                keys can land there instead of the target app. Pass 'activate' with the \
+                target app name to bring it to the front in this SAME call first — or \
+                use slug_sequence to do activate+type+enter atomically.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -294,9 +298,54 @@ pub fn tool_definitions() -> Vec<Value> {
                     "mode": { "type": "string", "enum": ["chord", "text"], "default": "chord",
                               "description": "chord = key combo; text = type the string literally." },
                     "ref": { "type": "string", "description": "Optional node ref to focus before sending input." },
+                    "activate": { "type": "string", "description": "Optional app name to bring to the front FIRST (same call), so the keys land in it and not in the controlling client's window." },
+                    "settle_ms": { "type": "integer", "minimum": 0, "default": 120, "description": "Delay after activating before sending keys, to let the window-server settle." },
                     "reasoning": { "type": "string", "description": "Why (logged for auditing)." }
                 },
                 "required": ["keys"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "slug_activate",
+            "description": "Bring an application to the foreground (give it keyboard \
+                focus) so the NEXT synthetic input lands in it. Use this when Slug is \
+                driven from another window (e.g. a terminal) that keeps stealing focus. \
+                For typing right after, prefer slug_sequence (atomic).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string", "description": "Application name to activate, e.g. 'Safari'." },
+                    "settle_ms": { "type": "integer", "minimum": 0, "default": 120, "description": "How long to wait after activating, in ms." }
+                },
+                "required": ["app"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "slug_sequence",
+            "description": "Run several actions in ONE atomic call, with NO return to \
+                the client in between — so keyboard focus can't be stolen mid-sequence. \
+                This is THE way to type into another app when you drive Slug from a \
+                terminal: e.g. [{activate:'Safari'},{wait_ms:200},{text:'crane'},{key:'return'}]. \
+                Steps run in order; each step is one of: \
+                {activate:'App'} (foreground an app), {focus:'ref'} (focus a node), \
+                {click:'ref'} (invoke a node) or {click_xy:[x,y]} (click a point), \
+                {key:'return'} (chord/keyname), {text:'hello'} (type literally), \
+                {wait_ms:200} (pause).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "minItems": 1,
+                        "description": "Ordered list of step objects (see description).",
+                        "items": { "type": "object" }
+                    },
+                    "settle_ms": { "type": "integer", "minimum": 0, "default": 150, "description": "Default pause inserted right after each {activate} step." },
+                    "reasoning": { "type": "string", "description": "Why (logged for auditing)." }
+                },
+                "required": ["steps"],
                 "additionalProperties": false
             }
         }),
@@ -424,6 +473,8 @@ async fn handle_tool_call(
         "slug_click" => tool_click(session, &args).await,
         "slug_scroll" => tool_scroll(session, &args).await,
         "slug_key" => tool_key(session, &args).await,
+        "slug_activate" => tool_activate(session, &args).await,
+        "slug_sequence" => tool_sequence(session, &args).await,
         "slug_wait_for" => tool_wait_for(session, &args).await,
         "slug_list_apps" => tool_list_apps(session).await,
         "slug_help" => Ok(help_text()),
@@ -481,6 +532,12 @@ args, reasoning}. Forms: set_text every field, then click submit last.\n\
 NO ACCESSIBLE TREE (canvas/games): slug_click {x,y}, slug_scroll {x,y,dy} (dy<0 = \
 down), slug_key {keys:\"cmd+s\"} or {keys:\"hello\", mode:\"text\"}. Get x,y from a \
 snapshot (coords:true); never invent them.\n\
+FOCUS GOTCHA: if you drive Slug from another window (e.g. a terminal), focus \
+returns there between calls, so keys can miss the target app. FIX: send the whole \
+move in ONE call with slug_sequence, e.g. \
+[{activate:\"Safari\"},{wait_ms:200},{text:\"crane\"},{key:\"return\"}] — nothing can \
+steal focus mid-sequence. Or pass activate:\"App\" to slug_key/slug_click to \
+foreground it first in the same call. slug_activate {app} just brings it to front.\n\
 OTHER: slug_launch {name, uri?} (uri jumps straight to a page/state); \
 slug_list_apps. slug_wait_for often times out — prefer snapshotting again.\n\
 RULES: refs change whenever the UI changes — re-snapshot, never reuse old refs. \
@@ -578,8 +635,93 @@ async fn tool_click(session: &Arc<Session>, args: &Value) -> std::result::Result
     let x = args.get("x").and_then(Value::as_f64).ok_or("missing numeric 'x'")?;
     let y = args.get("y").and_then(Value::as_f64).ok_or("missing numeric 'y'")?;
     let reasoning = args.get("reasoning").and_then(Value::as_str);
+    maybe_activate(session, args.get("activate").and_then(Value::as_str), args).await?;
     session.synth("click_at", Some(&format!("{x},{y}")), None, reasoning).await.map_err(|e| e.to_string())?;
     Ok(format!("ok: clicked at {x},{y}"))
+}
+
+/// If an `activate` app name is present, foreground it and pause `settle_ms`
+/// (default 120ms) before the caller sends input — so the input lands there and
+/// not in the window the controlling client lives in.
+async fn maybe_activate(
+    session: &Arc<Session>,
+    app: Option<&str>,
+    args: &Value,
+) -> std::result::Result<(), String> {
+    if let Some(app) = app.map(str::trim).filter(|s| !s.is_empty()) {
+        session.activate(app).await.map_err(|e| e.to_string())?;
+        let ms = args.get("settle_ms").and_then(Value::as_u64).unwrap_or(120);
+        if ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        }
+    }
+    Ok(())
+}
+
+async fn tool_activate(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
+    let app = args.get("app").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+        .ok_or("missing 'app'")?;
+    maybe_activate(session, Some(app), args).await?;
+    Ok(format!("ok: activated {app}"))
+}
+
+/// Run a list of steps atomically in one call (no client round-trip between
+/// them), so keyboard focus can't be stolen mid-sequence. See the tool schema for
+/// the step grammar.
+async fn tool_sequence(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
+    let steps = args.get("steps").and_then(Value::as_array).ok_or("missing 'steps' array")?;
+    if steps.is_empty() {
+        return Err("'steps' is empty".into());
+    }
+    let reasoning = args.get("reasoning").and_then(Value::as_str);
+    let settle_ms = args.get("settle_ms").and_then(Value::as_u64).unwrap_or(150);
+    let mut log: Vec<String> = Vec::new();
+
+    for (i, step) in steps.iter().enumerate() {
+        let obj = step.as_object().ok_or_else(|| format!("step {} is not an object", i + 1))?;
+        let n = i + 1;
+        // Each step object carries exactly one action key.
+        if let Some(app) = obj.get("activate").and_then(Value::as_str) {
+            session.activate(app).await.map_err(|e| format!("step {n} activate: {e}"))?;
+            if settle_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(settle_ms)).await;
+            }
+            log.push(format!("activate {app}"));
+        } else if let Some(r) = obj.get("focus").and_then(Value::as_str) {
+            session.invoke(r, "focus", None, reasoning).await.map_err(|e| format!("step {n} focus: {e}"))?;
+            log.push(format!("focus {r}"));
+        } else if let Some(r) = obj.get("click").and_then(Value::as_str) {
+            session.invoke(r, "click", None, reasoning).await.map_err(|e| format!("step {n} click: {e}"))?;
+            log.push(format!("click {r}"));
+        } else if let Some(xy) = obj.get("click_xy").and_then(Value::as_array) {
+            let (x, y) = xy_pair(xy).ok_or_else(|| format!("step {n} click_xy: expected [x,y]"))?;
+            session.synth("click_at", Some(&format!("{x},{y}")), None, reasoning).await
+                .map_err(|e| format!("step {n} click_xy: {e}"))?;
+            log.push(format!("click_xy {x},{y}"));
+        } else if let Some(keys) = obj.get("key").and_then(Value::as_str) {
+            session.synth("key", Some(keys), None, reasoning).await.map_err(|e| format!("step {n} key: {e}"))?;
+            log.push(format!("key {keys}"));
+        } else if let Some(text) = obj.get("text").and_then(Value::as_str) {
+            session.synth("type_text", Some(text), None, reasoning).await.map_err(|e| format!("step {n} text: {e}"))?;
+            log.push(format!("text \"{text}\""));
+        } else if let Some(ms) = obj.get("wait_ms").and_then(Value::as_u64) {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            log.push(format!("wait {ms}ms"));
+        } else {
+            return Err(format!(
+                "step {n}: unknown step (use activate/focus/click/click_xy/key/text/wait_ms)"
+            ));
+        }
+    }
+    Ok(format!("ok: ran {} steps → {}", steps.len(), log.join(" · ")))
+}
+
+/// Parse a JSON `[x, y]` number pair.
+fn xy_pair(arr: &[Value]) -> Option<(f64, f64)> {
+    match arr {
+        [x, y, ..] => Some((x.as_f64()?, y.as_f64()?)),
+        _ => None,
+    }
 }
 
 async fn tool_scroll(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
@@ -602,6 +744,7 @@ async fn tool_key(session: &Arc<Session>, args: &Value) -> std::result::Result<S
     let reasoning = args.get("reasoning").and_then(Value::as_str);
     let verb = if mode == "text" { "type_text" } else { "key" };
 
+    maybe_activate(session, args.get("activate").and_then(Value::as_str), args).await?;
     session.synth(verb, Some(keys), focus, reasoning).await.map_err(|e| e.to_string())?;
     Ok(format!("ok: sent {mode} '{keys}' to the focused app"))
 }

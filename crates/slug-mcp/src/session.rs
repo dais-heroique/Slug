@@ -290,6 +290,14 @@ impl Session {
         Ok(())
     }
 
+    /// Bring an already-running app to the foreground so subsequent synthetic input
+    /// lands in it (not in the controlling client's window). Does not require the
+    /// accessibility bus — it's a window-server action.
+    pub async fn activate(&self, name: &str) -> Result<()> {
+        slug_bridge::activate::activate(name).map_err(SessionError::Bridge)?;
+        Ok(())
+    }
+
     /// List running accessible applications.
     pub async fn list_apps(self: &Arc<Self>) -> Result<Vec<slug_bridge::AppInfo>> {
         let bridge = self.ensure_bridge().await?;
