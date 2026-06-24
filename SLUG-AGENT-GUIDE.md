@@ -186,6 +186,15 @@ then `slug_key`. For shortcuts in any app: just `slug_key {keys:"cmd+s"}`.
 > - For a multi-key move, use **`slug_sequence`** — it runs everything in one
 >   atomic call so nothing can steal focus mid-way (this is what makes typing into
 >   another app reliable, the native equivalent of one `osascript` command).
+>
+> **This applies to shortcuts too, not just typing.** A chord like `cmd+a` /
+> `cmd+c` / `cmd+s` with no `activate` lands in whatever is frontmost — usually
+> your own client window, where `cmd+a` selects *its* text and `cmd+c` copies *its*
+> clipboard. The keystroke "succeeds" yet the target app is untouched. Always pass
+> `activate:"<App>"` (or wrap the chord in `slug_sequence`) when the app you mean
+> isn't guaranteed frontmost. Don't verify a shortcut by reading the clipboard —
+> it's not a reliable signal it reached the right app; re-snapshot the target
+> instead.
 
 ### `slug_activate` / `slug_sequence` — beat focus theft
 ```json

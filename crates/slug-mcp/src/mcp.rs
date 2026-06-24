@@ -762,9 +762,22 @@ async fn tool_key(session: &Arc<Session>, args: &Value) -> std::result::Result<S
     let reasoning = args.get("reasoning").and_then(Value::as_str);
     let verb = if mode == "text" { "type_text" } else { "key" };
 
-    maybe_activate(session, args.get("activate").and_then(Value::as_str), args).await?;
+    let activate = args.get("activate").and_then(Value::as_str);
+    maybe_activate(session, activate, args).await?;
     session.synth(verb, Some(keys), focus, reasoning).await.map_err(|e| e.to_string())?;
-    Ok(format!("ok: sent {mode} '{keys}' to the focused app"))
+    match activate {
+        Some(app) => Ok(format!("ok: sent {mode} '{keys}' to {app}")),
+        // No target app: the OS routes synthetic input to whatever is frontmost,
+        // which — when Slug is driven from a terminal/another window — is the
+        // CLIENT, not the app you meant. Say so, so a chord that "did nothing"
+        // (e.g. cmd+a landing in the terminal) isn't mistaken for a bug.
+        None => Ok(format!(
+            "ok: posted {mode} '{keys}' to whatever app is frontmost. \
+             If you're driving Slug from another window and this seemed to do nothing, \
+             the keys likely landed in your client — pass activate:\"<App>\" (same call) \
+             or use slug_sequence so they reach the target app."
+        )),
+    }
 }
 
 async fn tool_wait_for(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
