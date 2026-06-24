@@ -44,8 +44,13 @@ If step 4 doesn't show the expected change, re-read and try a different ref/acti
   tree. The letter is a hint (b=button-ish, e=element/window, i=input, c=check,
   s=slider) but **always trust the role, not the letter.**
 - **States** you'll see in brackets: `focused`, `checked`, `selected`, `expanded`,
-  `disabled`, `readonly`, `required`, `invalid`. A `disabled` node won't respond
-  to actions — don't invoke it.
+  `disabled`, `readonly`, `required`, `invalid`.
+  - `[disabled]` means the OS toolkit flagged the node inactive. `click`, `toggle`,
+    `expand` will do nothing — but **`set_text` can still work** via the AX API even
+    on a `[disabled]` entry (e.g. TextEdit in "Prevent Editing" mode). Try it; read
+    the result text.
+  - `[readonly]` on an entry means the user can't type in it, but `set_text` may
+    still succeed programmatically. Same rule: try, read result.
 - After any action that changes the tree (opening a dialog, switching windows),
   **the old refs may be invalid.** Re-snapshot to rebuild them.
 
@@ -163,38 +168,40 @@ there but off-screen" (e.g. a Canva design type not yet visible). macOS + Window
 
 ### `slug_key` — drive ANY app, including opaque ones
 ```json
-{ "keys": "cmd+s", "mode": "chord" | "text", "ref": "i1", "reasoning": "why" }
+{ "keys": "cmd+s", "mode": "chord" | "text", "activate": "TextEdit",
+  "ref": "i1", "reasoning": "why" }
 ```
-Synthetic OS keyboard input to the **focused** app. This is how you act on apps
-that show up as opaque (no accessible tree) — and it still uses **no pixels and no
-tokens** (it injects an OS event, never a screenshot).
+Synthetic OS keyboard input. This is how you act on apps that show up as opaque
+(no accessible tree) — **no pixels, no tokens**, pure event injection.
 - `mode: "chord"` (default) → a key combo: `cmd+s`, `shift+tab`, `return`,
   `escape`, `up`/`down`/`left`/`right`, `cmd+shift+z`, function keys `f1`…`f12`.
-- `mode: "text"` → type the string literally into whatever has focus.
-- `ref` (optional) → focus that accessible node first, then send the input.
+- `mode: "text"` → type the string literally into the focused app.
+- `activate` → **always pass this when Slug is driven from a terminal.**
+  Without it the chord/text lands in whatever window is frontmost — your client —
+  and the target app is untouched. The tool returns `ok` either way (the OS doesn't
+  report where the event went), so a silent miss looks like a success.
+- `ref` (optional) → focus that accessible node first, then send input.
 
-Pattern for an opaque app: bring it to the front / focus its field if you can,
-then `slug_key`. For shortcuts in any app: just `slug_key {keys:"cmd+s"}`.
-(Implemented in-process on macOS and Windows.)
-
-> **Focus gotcha (read this for games / web apps).** If you drive Slug from
-> another window (e.g. Claude Code in a terminal), keyboard focus returns to that
-> window *between* tool calls — so a `slug_key` on the next call can land in the
-> terminal instead of the game. Two fixes:
-> - `slug_key`/`slug_click` accept `activate: "Safari"` (+ optional `settle_ms`):
->   they foreground that app in the **same** call before sending input.
-> - For a multi-key move, use **`slug_sequence`** — it runs everything in one
->   atomic call so nothing can steal focus mid-way (this is what makes typing into
->   another app reliable, the native equivalent of one `osascript` command).
+> ⚠️ **ALWAYS pass `activate` for keyboard input.** Field testing showed that
+> `cmd+a` / `cmd+c` / `cmd+s` without `activate` consistently land in the
+> **terminal (or Claude Code window)** not in the target app. The result says `ok`.
+> Nothing happens in the app. This is the #1 source of "slug_key seems broken".
 >
-> **This applies to shortcuts too, not just typing.** A chord like `cmd+a` /
-> `cmd+c` / `cmd+s` with no `activate` lands in whatever is frontmost — usually
-> your own client window, where `cmd+a` selects *its* text and `cmd+c` copies *its*
-> clipboard. The keystroke "succeeds" yet the target app is untouched. Always pass
-> `activate:"<App>"` (or wrap the chord in `slug_sequence`) when the app you mean
-> isn't guaranteed frontmost. Don't verify a shortcut by reading the clipboard —
-> it's not a reliable signal it reached the right app; re-snapshot the target
-> instead.
+> ```json
+> // ❌ Wrong — chord lands in the terminal
+> { "keys": "cmd+s" }
+>
+> // ✅ Right — chord goes to TextEdit
+> { "keys": "cmd+s", "activate": "TextEdit", "reasoning": "save file" }
+> ```
+>
+> For multiple keystrokes, use `slug_sequence` — one atomic call, focus can't
+> be stolen between steps:
+> ```json
+> { "steps": [{"activate":"TextEdit"}, {"key":"cmd+a"}, {"key":"cmd+c"}] }
+> ```
+> Don't verify a chord worked by reading the clipboard — it may hold *your*
+> client's clipboard. Re-snapshot the target app instead.
 
 ### `slug_activate` / `slug_sequence` — beat focus theft
 ```json
@@ -259,7 +266,9 @@ before a `desktop` snapshot.
 - ❌ Acting on a `ref` from a snapshot taken **before** the tree changed. Refs go
   stale when windows/dialogs open or close — re-snapshot.
 - ❌ Inventing coordinates, key chords, or pixel positions. Slug has none of that.
-- ❌ Acting on `disabled` nodes.
+- ❌ Giving up on `set_text` just because a node shows `[disabled]`. Try it —
+  `set_text` works via AX API even on nodes flagged disabled (e.g. TextEdit in
+  Prevent Editing mode). Only `click`/`toggle` are truly blocked on disabled nodes.
 - ❌ Long prose between tool calls. Read, act, verify; keep reasoning to one line.
 
 ---
@@ -358,6 +367,18 @@ no nodes anyway, so a full snapshot tells you nothing a filtered one doesn't.
    (or { filter: "save" } / Esc to leave a draft)
 ```
 
+**Canva (web) — navigate and click on opaque canvas**
+```
+1. slug_launch Safari uri=https://www.canva.com
+2. slug_snapshot { app: "Safari", roles: ["button", "link"], filter: "design" }
+   → find CTA ("Start designing for free", "Create a design", etc.)
+3. slug_invoke ref=bXXX action=click   # if accessible node
+   OR slug_click { x: <x>, y: <y> }   # if canvas zone — read @x,y from coords:true snapshot
+4. After page nav, re-snapshot for the next step
+Note: Canva requires login for templates. slug_snapshot { roles: ["button", "link"] }
+to find the login button and fill credentials with set_text on the entry fields.
+```
+
 ### Known OS limitations (don't fight these — work around them)
 Some macOS apps expose little or no accessibility tree. These are OS facts, not
 Slug bugs; the workaround is always the same — drive them with synthetic input
@@ -398,12 +419,16 @@ container — keep reading into it.
 
 - **Transports:** stdio (Claude Code) or HTTP (`/mcp`); dashboard at
   `http://127.0.0.1:7333/dashboard` when running HTTP.
-- **Permissions:** Windows needs none; macOS needs Accessibility granted to the
-  *specific binary* running Slug (the launchd daemon `~/.slug/bin/slug-mcp` for the
-  dashboard, or your terminal for stdio).
-- If a snapshot errors with *"permission denied / AXIsProcessTrusted returned
-  false / not connected"*, it's an OS permission problem, **not** something you can
-  fix with more tool calls — report it and the fix (grant Accessibility, restart).
+- **Permissions (macOS):** Two separate binaries, each needs its own grant in
+  **System Settings → Privacy & Security → Accessibility**:
+  - `~/.slug/bin/slug-mcp` — the launchd daemon (dashboard + HTTP clients)
+  - The binary launched via stdio by Claude Code (shown in `ps aux | grep slug-mcp`)
+  After granting, restart the daemon:
+  `launchctl kickstart -k gui/$(id -u)/org.slug.daemon && curl http://127.0.0.1:7333/healthz`
+  Expected: `ok`. If you still see "permission denied", the wrong binary was added.
+- If a snapshot errors with *"permission denied / not connected"*, it's an OS
+  permission problem — **not** something fixable with more tool calls. Report it
+  and the fix above.
 
 ---
 
