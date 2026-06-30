@@ -114,6 +114,24 @@ Omit all filters only when you genuinely need the *structure* (hierarchy) of the
 window. Exact `roles` values are the lower-case role names exactly as printed in a
 snapshot (`button`, `entry`, `link`, `heading`, `static_text`, `combo_box`, …).
 
+**A bare `limit` (no `filter`/`roles`) still switches to the compact flat list** —
+it does not pull the whole tree first and then cap it. `{ limit: 30 }` alone is
+enough to keep a dense page small.
+
+**On a dense page (e.g. an e-commerce search results page), an unfiltered
+snapshot is truncated past ~20k characters** with a note telling you to narrow
+it — full unfiltered dumps of pages like this can run to hundreds of KB, which
+overflows your own tool-result limit and forces a slow file-dump-and-grep
+fallback. Don't try to raise this with a `depth` or `max_chars` argument —
+neither exists. Narrow with `filter`/`roles`/`interactive_only`/`limit` instead.
+
+**Prices, ratings, and similar text don't reliably match a currency symbol** —
+Amazon prints "EUR 26.32", not "$26.32", so `filter: "$"` finds nothing. For
+this kind of scan, prefer a role-only sweep with a generous limit —
+`{ roles: ["text"], limit: 200 }` (or scope to one product card via `app`/a
+nested `filter` on the product name) — and read the values out of that flat
+list instead of guessing a currency-specific substring.
+
 ### `slug_invoke`
 ```json
 { "ref": "b1", "action": "click", "args": "optional", "reasoning": "why" }

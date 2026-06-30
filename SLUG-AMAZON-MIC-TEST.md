@@ -11,6 +11,14 @@ Chrome) jusqu'à un acte d'achat — sans aller jusqu'au paiement.
 > d'approbation humaine (action jugée destructive — "buy", "order", "pay" sont
 > des mots-clés qui la déclenchent), **réponds toujours "refuser"** dans le
 > dashboard (`http://127.0.0.1:7333/dashboard`) ou laisse le timeout expirer.
+>
+> ⚠️ **Reste sur des `slug_snapshot` filtrés** (`filter`/`roles`/`limit`,
+> comme dans chaque étape ci-dessous) — une page de résultats Amazon est dense
+> et un snapshot non filtré (`interactive_only:false` sans `roles`/`filter`/
+> `limit`) peut faire des centaines de Ko, ce qui dépasse ta propre limite de
+> taille de résultat d'outil et te force dans un détour lent (dump fichier +
+> grep). Slug tronque maintenant ce cas à ~20k caractères avec un message —
+> mais autant ne pas en arriver là : filtre côté serveur dès le départ.
 
 ---
 

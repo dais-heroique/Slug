@@ -59,8 +59,10 @@ impl SnapshotFilter {
     pub const DEFAULT_LIMIT: usize = 50;
 
     /// Whether any constraint is set. When `false`, callers render the full tree.
+    /// `limit` alone counts — a bare `{limit: 20}` should cap output, not be
+    /// silently ignored because no query/roles/interactive_only came with it.
     pub fn is_active(&self) -> bool {
-        self.query.is_some() || !self.roles.is_empty() || self.interactive_only
+        self.query.is_some() || !self.roles.is_empty() || self.interactive_only || self.limit.is_some()
     }
 
     fn limit(&self) -> usize {
@@ -522,6 +524,7 @@ mod tests {
         assert!(interactive.is_active());
 
         let capped = SnapshotFilter { limit: Some(5), ..Default::default() };
+        assert!(capped.is_active(), "a bare limit must activate filtered rendering, not be ignored");
         assert_eq!(capped.limit(), 5);
     }
 

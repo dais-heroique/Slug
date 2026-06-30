@@ -144,7 +144,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 'filter' (text), 'roles' (e.g. [\"button\",\"entry\"]) and/or \
                 'interactive_only', which return a compact FLAT list of just the \
                 matching nodes, each with its ref AND centre @x,y (for slug_click). \
-                Prefer that over reading the whole tree.",
+                Prefer that over reading the whole tree — an unfiltered dump of a dense page \
+                (e.g. an e-commerce search results page) is truncated past ~20k characters, \
+                since returning everything tends to overflow a calling client's own result \
+                limit. There is no 'depth' or 'max_chars' parameter — control output size with \
+                'filter'/'roles'/'interactive_only'/'limit' instead.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -194,8 +198,10 @@ pub fn tool_definitions() -> Vec<Value> {
                         "type": "integer",
                         "minimum": 1,
                         "default": 50,
-                        "description": "Max nodes returned in filtered mode (default 50). \
-                            Set limit:1 with a filter to get just the single best match — \
+                        "description": "Max nodes returned (default 50). Passing 'limit' alone, \
+                            with no filter/roles/interactive_only, still switches to the compact \
+                            flat list capped at this many nodes — it does not return the full \
+                            tree. Set limit:1 with a filter to get just the single best match — \
                             results are ranked so an exact name match comes first."
                     },
                     "coords": {
@@ -628,13 +634,50 @@ async fn tool_snapshot(session: &Arc<Session>, args: &Value) -> std::result::Res
     }
     // If an unfiltered snapshot came back large, nudge the agent to filter next
     // time — this keeps any client token-efficient without it reading the docs.
-    if !active && text.len() > 8_000 {
+    // Past SNAPSHOT_HARD_CAP we don't just nudge, we truncate: dense pages (e.g.
+    // an e-commerce search/product page) can render hundreds of KB of YAML for
+    // the full tree, which blows straight past a calling client's own
+    // tool-result size limit — that overflow has been observed in practice to
+    // force a slow file-dump-and-grep fallback that takes minutes instead of
+    // seconds. Returning a truncated tree with clear next steps is strictly
+    // better than returning everything and letting the caller's transport choke.
+    if !active && text.len() > SNAPSHOT_HARD_CAP_CHARS {
+        truncate_at_char_boundary(&mut text, SNAPSHOT_HARD_CAP_CHARS);
+        text.push_str(&format!(
+            "\n# … truncated at {SNAPSHOT_HARD_CAP_CHARS} chars — the full tree is much larger \
+             and would likely overflow your own result limits. This page is too dense for a full \
+             dump; narrow it instead: slug_snapshot {{roles:[\"button\"|\"link\"|\"text\"], \
+             filter:\"text\", limit:20}} or {{interactive_only:true, limit:50}}. For text content \
+             like prices/ratings that won't match a literal symbol (e.g. \"EUR 26.32\" has no \
+             \"$\"), prefer roles:[\"text\"] with a generous limit over guessing a filter string.\n"
+        ));
+    } else if !active && text.len() > SNAPSHOT_TIP_THRESHOLD_CHARS {
         text.push_str(
             "\n# tip: large result — to save tokens, narrow it: \
              slug_snapshot {roles:[\"button\"|\"field\"|…], filter:\"text\", limit:1}\n",
         );
     }
     Ok(text)
+}
+
+/// Soft threshold: past this, append an advisory tip but still return the full
+/// unfiltered tree.
+const SNAPSHOT_TIP_THRESHOLD_CHARS: usize = 8_000;
+
+/// Hard cap on an unfiltered (full-tree) snapshot's rendered length. Past this,
+/// truncate rather than return everything — see the comment at the call site.
+const SNAPSHOT_HARD_CAP_CHARS: usize = 20_000;
+
+const _: () = assert!(SNAPSHOT_HARD_CAP_CHARS > SNAPSHOT_TIP_THRESHOLD_CHARS);
+
+/// Truncate `s` to at most `max` bytes, backing off to the nearest UTF-8 char
+/// boundary so we never split a multi-byte character.
+fn truncate_at_char_boundary(s: &mut String, max: usize) {
+    let mut cut = max.min(s.len());
+    while cut > 0 && !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    s.truncate(cut);
 }
 
 async fn tool_invoke(session: &Arc<Session>, args: &Value) -> std::result::Result<String, String> {
@@ -882,4 +925,28 @@ async fn tool_status(
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod snapshot_cap_tests {
+    use super::*;
+
+    #[test]
+    fn truncate_caps_length_and_respects_char_boundaries() {
+        let mut s = "a".repeat(50);
+        truncate_at_char_boundary(&mut s, 20);
+        assert_eq!(s.len(), 20);
+
+        // A multi-byte char (3 bytes) sitting right at the cut point must not be
+        // split — the cut should back off to the char before it.
+        let mut s: String = std::iter::repeat('a').take(19).chain(std::iter::once('€')).collect();
+        truncate_at_char_boundary(&mut s, 20);
+        assert!(s.is_char_boundary(s.len()));
+        assert_eq!(s, "a".repeat(19));
+
+        // Shorter than the cap: untouched.
+        let mut s = "short".to_string();
+        truncate_at_char_boundary(&mut s, 20);
+        assert_eq!(s, "short");
+    }
 }
