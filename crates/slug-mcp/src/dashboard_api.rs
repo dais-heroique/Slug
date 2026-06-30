@@ -324,8 +324,6 @@ fn load_secret_map() -> std::collections::BTreeMap<String, String> {
 }
 
 fn write_secret_map(map: &std::collections::BTreeMap<String, String>) -> Result<(), String> {
-    use std::io::Write;
-
     let path = secrets_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
@@ -337,6 +335,7 @@ fn write_secret_map(map: &std::collections::BTreeMap<String, String>) -> Result<
     // write-then-chmod.
     #[cfg(unix)]
     {
+        use std::io::Write;
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         let mut f = std::fs::OpenOptions::new()
             .write(true)
