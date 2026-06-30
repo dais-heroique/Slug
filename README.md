@@ -188,8 +188,12 @@ Logging goes to **stderr** (stdout is the JSON-RPC channel). Tune with
 | `slug_key` | `{ "keys": "cmd+s", "mode"?: "chord"\|"text", "ref"?: "i1", "reasoning"?: "…" }` | Synthetic keyboard input to the focused app — a key chord or literal text. Drives **any** app, including opaque ones (no accessibility tree), still **no pixels**. |
 | `slug_click` | `{ "x": 640, "y": 360, "reasoning"?: "…" }` | Synthetic left mouse click at absolute screen coordinates — click **anywhere**, including opaque apps. No pixels. |
 | `slug_scroll` | `{ "x": 640, "y": 360, "dy": -3, "dx"?: 0 }` | Synthetic scroll at coordinates (negative `dy` = down) to reveal off-screen content (grids, lists). No pixels. |
+| `slug_activate` | `{ "app": "Safari" }` | Brings an app to the foreground — use before `slug_key`/`slug_click` so synthetic input lands where you intend, not wherever the OS last had focus. |
+| `slug_sequence` | `{ "steps": [{ "activate": "Safari" }, { "wait_ms": 200 }, { "text": "…" }, { "key": "return" }] }` | Runs `activate`/`text`/`key`/`ref`+`action`/`wait_ms` steps **atomically** — nothing else can steal focus mid-sequence. The reliable way to drive keyboard/mouse input end to end. |
 | `slug_wait_for` | `{ "event_type"?: "focus_changed" \| …, "timeout_ms": 5000 }` | Blocks until a live UI event occurs or the timeout elapses. |
 | `slug_list_apps` | `{}` | Lists running applications exposing an accessibility tree. |
+| `slug_help` | `{}` | A compact cheat-sheet of every tool, returned as text — cheap to call on demand instead of relying on the client to surface long instructions. |
+| `slug_status` | `{}` | One-shot health report printed straight into the chat: app version, AI brain, which transport an MCP client is connected over, accessibility-bus reachability, pending destructive-action approvals, and the running agent task if any — the dashboard's content as text, for clients that can't open a browser. |
 | `slug_agent_start_task` | `{ "description": "…" }` | Starts the `slug-brain` agent on a task (see [Control dashboard](#mcp-native-control-dashboard)). |
 | `slug_agent_status` | `{}` | Current task, status, active provider/tier/model, last 20 reasoning/action log lines. |
 | `slug_agent_pause` / `slug_agent_resume` / `slug_agent_stop` | `{}` | Pause / resume / stop the running agent task. |
