@@ -305,6 +305,16 @@ pub async fn run_http(
     /// Accept a request only if it is local: any present `Origin` and `Host`
     /// header must point at loopback. This blocks cross-site / DNS-rebinding
     /// attacks while leaving local CLI clients (no Origin) untouched.
+    ///
+    /// A request with *neither* header present is allowed through — this is
+    /// intentionally permissive for non-browser clients (curl, Claude Code),
+    /// not a gap: HTTP/1.1 requires `Host` on every request, and hyper/axum
+    /// reject a request that omits it before this handler ever runs, so a
+    /// browser cannot reach this code path without sending a `Host` we can
+    /// check. Only a raw, hand-crafted client could omit it, and such a
+    /// client isn't subject to the cross-site/DNS-rebinding threat this
+    /// check exists for in the first place (it's not running in a victim's
+    /// browser).
     fn local_request_ok(headers: &axum::http::HeaderMap) -> bool {
         fn host_is_local(h: &str) -> bool {
             // Strip scheme and any path, then the port — keeping bracketed IPv6

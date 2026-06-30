@@ -335,17 +335,35 @@ fn load_secret_map() -> std::collections::BTreeMap<String, String> {
 }
 
 fn write_secret_map(map: &std::collections::BTreeMap<String, String>) -> Result<(), String> {
+    use std::io::Write;
+
     let path = secrets_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
     }
     let body: String = map.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
-    std::fs::write(&path, body).map_err(|e| format!("write {}: {e}", path.display()))?;
-    // Owner-only permissions (0600) on Unix.
+
+    // On Unix, create the file with owner-only (0600) permissions from the
+    // first byte — no window where it's briefly world/group-readable, unlike
+    // write-then-chmod.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("open {}: {e}", path.display()))?;
+        f.write_all(body.as_bytes()).map_err(|e| format!("write {}: {e}", path.display()))?;
+        // `mode()` only applies to a freshly created file; re-assert 0600 in
+        // case this file pre-dates this fix and was left more permissive.
+        let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&path, body).map_err(|e| format!("write {}: {e}", path.display()))?;
     }
     Ok(())
 }
@@ -614,6 +632,41 @@ mod tests {
 
         std::env::remove_var("SLUG_TEST_KEY");
         std::env::remove_var("SLUG_SECRETS");
+    }
+
+    #[test]
+    fn client_status_reflects_the_cross_process_heartbeat() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("slughb{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("SLUG_HEARTBEAT", dir.join("heartbeat.json"));
+
+        // No client has ever connected (no heartbeat file yet).
+        let s = client_status(60);
+        assert_eq!(s["connected"], false);
+        assert!(s["transport"].is_null());
+
+        // A stdio client just connected — both transports must be able to
+        // report their own activity into the same file (that's the whole
+        // point: the HTTP daemon and the stdio process are separate OS
+        // processes that otherwise share no state).
+        record_heartbeat("stdio");
+        let s = client_status(60);
+        assert_eq!(s["connected"], true);
+        assert_eq!(s["transport"], "stdio");
+
+        // A 0-second freshness window means even a heartbeat from "just now"
+        // reads as stale — exercises the staleness branch deterministically,
+        // without sleeping.
+        let s = client_status(0);
+        assert_eq!(s["connected"], false);
+
+        // The other transport overwrites the heartbeat — last writer wins,
+        // matching the dashboard's "currently connected" semantics.
+        record_heartbeat("http");
+        assert_eq!(client_status(60)["transport"], "http");
+
+        std::env::remove_var("SLUG_HEARTBEAT");
     }
 
     #[test]
