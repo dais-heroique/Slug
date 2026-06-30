@@ -6,18 +6,20 @@
 <title>Slug</title>
 <style>
   :root{
-    --bg:#070710; --bg2:#0c0c17; --panel:#11111d; --panel2:#0d0d18; --line:#21212f;
-    --line2:#2d2d40; --fg:#ececf4; --muted:#9696ac; --dim:#64647a;
-    --accent:#8b7bff; --accent2:#22d3ee; --grad1:#7c5cff; --grad2:#22d3ee;
-    --ok:#34d399; --warn:#fbbf24; --bad:#fb6f6f; --chip:#181826;
+    /* palette pulled from the Slug brain mark: light cyan brain fill, black
+       outline, yellow eye-dots, green synapse-dots, on a near-black ground. */
+    --bg:#0e1015; --bg2:#141821; --panel:#161b25; --panel2:#11151e; --line:#222838;
+    --line2:#2c3447; --fg:#eaf6f8; --muted:#92a3ad; --dim:#5c6b76;
+    --accent:#62d9ee; --accent2:#5fa3e8; --grad1:#62d9ee; --grad2:#86e6a0;
+    --ok:#7fdb9e; --warn:#f2d35e; --bad:#f0826f; --chip:#1a2030;
   }
   *{box-sizing:border-box}
   html,body{height:100%}
   body{
     margin:0;
     background:
-      radial-gradient(900px 500px at 88% -8%, rgba(124,92,255,.18) 0%, transparent 60%),
-      radial-gradient(800px 500px at 5% 110%, rgba(34,211,238,.12) 0%, transparent 55%),
+      radial-gradient(900px 500px at 88% -8%, rgba(98,217,238,.16) 0%, transparent 60%),
+      radial-gradient(800px 500px at 5% 110%, rgba(134,230,160,.12) 0%, transparent 55%),
       var(--bg);
     color:var(--fg); font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
     display:flex; flex-direction:column; height:100vh; overflow:hidden;
@@ -45,7 +47,7 @@
     background:linear-gradient(180deg,rgba(20,20,34,.92),rgba(11,11,22,.92)); backdrop-filter:blur(8px);
     border-bottom:1px solid var(--line)}
   .brand{display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:.3px; font-size:16px}
-  .brand .logo{font-size:22px; filter:drop-shadow(0 0 10px rgba(124,92,255,.5))}
+  .brand .logo{font-size:22px; filter:drop-shadow(0 0 10px rgba(98,217,238,.55))}
   .brand .name{background:linear-gradient(90deg,var(--grad1),var(--grad2)); -webkit-background-clip:text;
     background-clip:text; -webkit-text-fill-color:transparent}
   .brand .ver{color:var(--dim); font-weight:500; font-size:11px; -webkit-text-fill-color:initial}
@@ -84,14 +86,14 @@
   .tile.wide{grid-column:1/-1}
   textarea{width:100%; min-height:76px; resize:vertical; padding:11px; background:var(--bg2);
     color:var(--fg); border:1px solid var(--line2); border-radius:10px; font:inherit; outline:none}
-  textarea:focus,input:focus,select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(124,92,255,.15)}
+  textarea:focus,input:focus,select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(98,217,238,.18)}
   .btns{display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:10px}
   button{font:inherit; cursor:pointer; border-radius:10px; border:1px solid var(--line2);
     background:var(--chip); color:var(--fg); padding:9px 12px; transition:.12s}
-  button:hover{border-color:var(--accent); background:#1d1d2e}
-  button.primary{background:linear-gradient(180deg,var(--grad1),#5b3fe0); border-color:#7a5cff; color:#fff; font-weight:600;
-    box-shadow:0 4px 16px rgba(124,92,255,.35)}
-  button.primary:hover{filter:brightness(1.1)}
+  button:hover{border-color:var(--accent); background:#202840}
+  button.primary{background:linear-gradient(135deg,var(--grad1),var(--grad2)); border-color:#52c8de; color:#06222a; font-weight:700;
+    box-shadow:0 4px 16px rgba(98,217,238,.3)}
+  button.primary:hover{filter:brightness(1.06)}
   button.ghost{background:transparent}
   button.span{grid-column:1/-1}
   .statuspill{margin-left:auto; font-size:11px; padding:3px 11px; border-radius:999px; text-transform:uppercase; letter-spacing:.05em; font-weight:600}
@@ -121,17 +123,9 @@
   .log{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:1.5}
   .log .line{padding:2px 0; border-bottom:1px solid #15151f; word-break:break-word}
   .log .err{color:var(--bad)} .log .ok{color:var(--ok)}
-  /* ---- mcp ---- */
-  .mcp-item{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid #15151f}
-  .mcp-item .nm{font-weight:600}
-  .mcp-item .url{color:var(--dim); font-size:11px} .mcp-item.mono .url{font-family:ui-monospace,monospace}
-  .mcp-item .x{margin-left:auto; color:var(--dim); border:none; background:none; padding:4px 8px}
-  .mcp-item .x:hover{color:var(--bad)}
   .stat{font-size:11px; padding:2px 8px; border-radius:999px}
-  .stat.self{background:#102338;color:var(--accent2)} .stat.reachable{background:#0e2a1c;color:var(--ok)}
+  .stat.reachable{background:#0e2a1c;color:var(--ok)}
   .stat.unreachable{background:#2a0f12;color:var(--bad)} .stat.command{background:#23232d;color:var(--muted)}
-  .addform{display:grid; grid-template-columns:1fr; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line)}
-  .addform .row{display:flex; gap:8px} .addform input{flex:1}
   /* ---- apps ---- */
   .app-item{padding:7px 0; border-bottom:1px solid #15151f; display:flex; gap:8px; align-items:center}
   .app-item .nm{font-weight:600} .app-item .bus{color:var(--dim); font-size:11px; margin-left:auto}
@@ -139,6 +133,8 @@
   /* ---- providers ---- */
   .prov{padding:10px 0; border-bottom:1px solid #15151f}
   .prov.on{background:#0e1726; border:1px solid #1d3350; border-radius:10px; padding:11px; margin:4px 0}
+  .provmsg{background:rgba(127,219,158,.12); border:1px solid var(--ok); color:var(--ok); border-radius:10px;
+    padding:8px 11px; font-size:12px; font-weight:600; margin-bottom:10px}
   .prow{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
   .prow2{display:flex; gap:7px; margin-top:8px; flex-wrap:wrap}
   .prov .pm{max-width:190px} .prov .pk{flex:1; min-width:140px}
@@ -169,7 +165,6 @@
   <div class="pills">
     <span class="pill" id="brainPill"><span class="dot" id="brainDot"></span><span class="k">brain</span> <b id="brainName">…</b></span>
     <span class="pill" id="clientPill"><span class="dot" id="clientDot"></span><b id="clientTxt">no client</b></span>
-    <span class="pill" id="mcpPill"><span class="dot" id="mcpDot"></span><span class="k">MCP</span> <b id="mcpCount">0</b></span>
   </div>
   <div class="spacer"></div>
   <span class="pill"><span class="dot" id="busDot"></span><b id="busTxt">perception</b></span>
@@ -233,42 +228,27 @@
     <div class="tabs">
       <div class="tab active" data-tab="log" onclick="showTab('log')">Activity</div>
       <div class="tab" data-tab="brain" onclick="showTab('brain')">Brain</div>
-      <div class="tab" data-tab="mcp" onclick="showTab('mcp')">MCP <span class="badge" id="mcpBadge">0</span></div>
       <div class="tab" data-tab="apps" onclick="showTab('apps')">Apps <span class="badge" id="appsBadge">0</span></div>
     </div>
     <div class="pane active" id="pane-log"><div class="body log" id="log"><span class="empty">no activity yet</span></div></div>
     <div class="pane" id="pane-brain"><div class="body">
       <div class="sectlabel">Connect an AI provider (API)</div>
+      <div id="providerMsg" class="provmsg" hidden></div>
       <div id="providers"><span class="empty">…</span></div>
       <div class="note" style="border:none;padding:8px 0 0">A key you paste is saved to <span class="mono">~/.slug/secrets.env</span> (owner-only, 0600) so you don't re-enter it after a restart — never in <span class="mono">slug.toml</span>. Leave it blank to use an env var you already set.</div>
     </div></div>
-    <div class="pane" id="pane-mcp">
-      <div class="body">
-        <div id="mcpList"><span class="empty">…</span></div>
-        <div class="addform">
-          <div class="sectlabel">Add a custom MCP server</div>
-          <input id="mcpName" class="f" placeholder="name (e.g. github)" />
-          <div class="row">
-            <input id="mcpUrl" class="f" placeholder="http://127.0.0.1:9000/mcp" />
-            <button class="primary" onclick="addMcp()">Add</button>
-          </div>
-          <div id="mcpMsg" style="color:var(--bad);font-size:11px;min-height:14px"></div>
-        </div>
-      </div>
-    </div>
     <div class="pane" id="pane-apps"><div class="body" id="apps"><span class="empty">—</span></div></div>
   </section>
 </main>
 
 <script>
-let rpcId=0, mcpOk=false, lastStatus='idle', treeText='', treeAt=0, appsAt=0, clientConnected=false;
+let rpcId=0, lastStatus='idle', treeText='', treeAt=0, appsAt=0, clientConnected=false;
 const TREE_TTL=1200;
 
 async function callTool(name, args={}){
   const r = await fetch('/mcp',{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({jsonrpc:'2.0',id:++rpcId,method:'tools/call',params:{name,arguments:args}})});
   const j = await r.json();
-  mcpOk=true;
   if(j.error) throw new Error(j.error.message||'tool error');
   const c=j.result&&j.result.content&&j.result.content[0];
   return {text:(c&&c.text)||'', isError:!!(j.result&&j.result.isError)};
@@ -406,40 +386,6 @@ async function refreshApps(){
   }catch(e){ document.getElementById('apps').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
 }
 
-// ---------- MCP servers ----------
-async function refreshMcp(){
-  try{
-    const j=await jget('/mcp-servers'); const servers=j.servers||[];
-    const reachable=servers.filter(s=>s.status==='reachable'||s.status==='serving').length;
-    document.getElementById('mcpCount').textContent=reachable;
-    document.getElementById('mcpBadge').textContent=servers.length;
-    setDot('mcpDot', reachable>0?'ok':'warn');
-    document.getElementById('mcpList').innerHTML=servers.map(s=>{
-      const cls=s.status||'command';
-      const label={serving:'serving',reachable:'connected',unreachable:'unreachable',command:'command'}[cls]||cls;
-      const rm=s.kind==='self'?'':`<button class="x" title="remove" onclick="removeMcp('${esc(s.name)}')">✕</button>`;
-      return `<div class="mcp-item mono"><div><div class="nm">${esc(s.name)}</div><div class="url">${esc(s.url)}</div></div>
-        <span class="stat ${cls}">${label}</span>${rm}</div>`;
-    }).join('')||'<span class="empty">none</span>';
-  }catch(e){ document.getElementById('mcpList').innerHTML='<span class="empty">'+esc(e.message)+'</span>'; }
-}
-async function addMcp(){
-  const name=document.getElementById('mcpName').value.trim();
-  const url=document.getElementById('mcpUrl').value.trim();
-  const msg=document.getElementById('mcpMsg'); msg.textContent='';
-  try{
-    const r=await fetch('/mcp-servers',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({name,url})});
-    if(!r.ok){ const j=await r.json().catch(()=>({})); throw new Error(j.error||('HTTP '+r.status)); }
-    document.getElementById('mcpName').value=''; document.getElementById('mcpUrl').value='';
-    refreshMcp();
-  }catch(e){ msg.textContent=e.message; }
-}
-async function removeMcp(name){
-  try{ await fetch('/mcp-servers',{method:'DELETE',headers:{'content-type':'application/json'},
-    body:JSON.stringify({name})}); refreshMcp(); }catch(e){}
-}
-
 // ---------- approvals ----------
 let apBusy=false;
 async function refreshApprovals(){
@@ -492,15 +438,23 @@ async function connectProvider(id){
     const r=await fetch('/providers',{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({slot:p.slot,base_url:p.base_url,key_env:p.key_env,model})});
     if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status));}
-    refreshProviders(); refreshInfo();
+    await refreshProviders(); refreshInfo();
+    flashConnected(p.label);
   }catch(e){ alert(e.message); }
+}
+function flashConnected(label){
+  const box=document.getElementById('providerMsg'); if(!box)return;
+  box.textContent='✓ '+label+' connected — saved.';
+  box.hidden=false;
+  clearTimeout(window._provMsgT);
+  window._provMsgT=setTimeout(()=>{ box.hidden=true; }, 2600);
 }
 
 // ---------- tabs ----------
 function showTab(t){
   document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.tab===t));
   document.querySelectorAll('.pane').forEach(e=>e.classList.toggle('active',e.id==='pane-'+t));
-  if(t==='mcp') refreshMcp(); if(t==='apps') refreshApps(); if(t==='brain') refreshProviders();
+  if(t==='apps') refreshApps(); if(t==='brain') refreshProviders();
 }
 
 // ---------- actions ----------
@@ -524,11 +478,9 @@ async function loop(){
   }
   setTimeout(loop, tick());
 }
-function slowLoop(){ if(!document.hidden){ refreshInfo();
-  if(document.getElementById('pane-mcp').classList.contains('active')) refreshMcp(); }
-  setTimeout(slowLoop, 5000); }
+function slowLoop(){ if(!document.hidden){ refreshInfo(); } setTimeout(slowLoop, 5000); }
 
-refreshInfo(); refreshMcp(); refreshTree(true); loop(); slowLoop();
+refreshInfo(); refreshTree(true); loop(); slowLoop();
 </script>
 </body>
 </html>

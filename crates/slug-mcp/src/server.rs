@@ -188,51 +188,6 @@ pub async fn run_http(
         .into_response()
     }
 
-    fn self_url(port: u16) -> String {
-        format!("http://127.0.0.1:{port}/mcp")
-    }
-
-    /// List MCP servers (this app + user-added) with live reachability.
-    async fn mcp_servers_list(State(state): State<AppState>, headers: axum::http::HeaderMap) -> axum::response::Response {
-        if !local_request_ok(&headers) {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        Json(crate::dashboard_api::list_servers(&self_url(state.port))).into_response()
-    }
-
-    /// Add a custom MCP server. Body: `{ "name": "...", "url": "http://host:port/mcp" }`.
-    async fn mcp_servers_add(
-        State(state): State<AppState>,
-        headers: axum::http::HeaderMap,
-        Json(body): Json<serde_json::Value>,
-    ) -> axum::response::Response {
-        if !local_request_ok(&headers) {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        let name = body.get("name").and_then(Value::as_str).unwrap_or("");
-        let url = body.get("url").and_then(Value::as_str).unwrap_or("");
-        match crate::dashboard_api::add_server(name, url, &self_url(state.port)) {
-            Ok(list) => Json(list).into_response(),
-            Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
-        }
-    }
-
-    /// Remove a custom MCP server. Body: `{ "name": "..." }`.
-    async fn mcp_servers_remove(
-        State(state): State<AppState>,
-        headers: axum::http::HeaderMap,
-        Json(body): Json<serde_json::Value>,
-    ) -> axum::response::Response {
-        if !local_request_ok(&headers) {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        let name = body.get("name").and_then(Value::as_str).unwrap_or("");
-        match crate::dashboard_api::remove_server(name, &self_url(state.port)) {
-            Ok(list) => Json(list).into_response(),
-            Err(e) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": e }))).into_response(),
-        }
-    }
-
     /// AI provider catalog + which one is active + key presence.
     async fn providers_get(headers: axum::http::HeaderMap) -> axum::response::Response {
         if !local_request_ok(&headers) {
@@ -351,7 +306,6 @@ pub async fn run_http(
         .route("/info", get(info))
         .route("/approvals", get(list_approvals))
         .route("/approve", post(decide_approval))
-        .route("/mcp-servers", get(mcp_servers_list).post(mcp_servers_add).delete(mcp_servers_remove))
         .route("/providers", get(providers_get).post(providers_set))
         .route("/provider-key", post(provider_key).delete(provider_key_forget))
         .route("/healthz", get(|| async { "ok" }))

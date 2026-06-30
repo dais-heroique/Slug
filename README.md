@@ -498,24 +498,28 @@ served by `slug-mcp` over the same transport, opened as its **own app window**
 (Chrome/Edge `--app`) by the packaged app so it feels native, not like a browser
 tab. It is one self-contained HTML/JS file (no framework). Top bar shows, at a
 glance, **which brain is connected** — *Claude* (cloud) or a *local model* (Ollama)
-with the model name — whether an **MCP client is connected**, and the **MCP server
-count**. Below:
+with the model name — and whether an **MCP client is connected** (e.g. Claude Code
+driving Slug directly). There's no separate "MCP servers" list in the dashboard:
+once a client is connected over MCP, you talk to it in *its own* app/terminal —
+the dashboard's job is the brain, the live tree, and approvals, not re-listing a
+connection you're already inside. Below:
 
 - **Agent** — brain card, metric tiles (steps / elapsed / tokens / cost), the task
   box, and start / pause / resume / stop. Full control of the agent.
 - **Semantic view** — the live tree from `slug_snapshot` rendered **as text**
   (role-coloured, `ref` chips, state pills, `@x,y`), with a filter box and scope
   selector.
-- **Tabs** — **Activity** (reasoning/result log, errors in red), **MCP** (every
-  connected MCP server with live reachability, and a form to **add your own custom
-  MCP servers** — persisted to `~/.slug/mcp_servers.json`), and **Apps** (running
+- **Tabs** — **Activity** (reasoning/result log, errors in red), **Brain**
+  (connect an AI provider by pasting its API key — saved to
+  `~/.slug/secrets.env`, 0600, never in `slug.toml`), and **Apps** (running
   accessible apps).
 - A red **approvals banner** appears on top when a destructive action awaits your
   approval, with Approve / Deny buttons.
 
 Backing HTTP endpoints (all loopback-gated): `GET /info` (app/brain/client),
-`GET /mcp-servers` + `POST`/`DELETE` (manage MCP servers), `GET /approvals` +
-`POST /approve`, and the agent-control tools over `POST /mcp`. The center panel
+`GET /providers` + `POST` (connect an AI provider), `POST`/`DELETE /provider-key`
+(save/forget an API key), `GET /approvals` + `POST /approve`, and the
+agent-control tools over `POST /mcp`. The center panel
 states, verbatim: *“Slug never captures pixels … the same structured text the agent
 reads.”*
 
