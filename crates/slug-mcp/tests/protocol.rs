@@ -91,6 +91,32 @@ async fn slug_help_is_listed_and_returns_a_cheat_sheet_without_a_bus() {
 }
 
 #[tokio::test]
+async fn slug_status_is_listed_and_reports_without_a_bus() {
+    let session = Session::new();
+    let resp = handle(&session, req(32, "tools/list", json!({}))).await.expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    let names: Vec<&str> =
+        v["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"slug_status"), "slug_status should be listed");
+    // callable without the accessibility bus and without an agent controller —
+    // it reports unreachable state as text, never as a protocol/tool error.
+    let resp = handle(
+        &session,
+        req(33, "tools/call", json!({ "name": "slug_status", "arguments": {} })),
+    )
+    .await
+    .expect("response");
+    let v = serde_json::to_value(&resp).unwrap();
+    assert!(v["error"].is_null());
+    assert_eq!(v["result"]["isError"], false);
+    let text = v["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Slug v"), "status report missing version line");
+    assert!(text.contains("Brain:"), "status report missing brain line");
+    assert!(text.contains("Accessibility bus:"), "status report missing bus line");
+    assert!(text.contains("Agent control: not available"), "status report should note no controller");
+}
+
+#[tokio::test]
 async fn snapshot_tool_advertises_server_side_filter() {
     let session = Session::new();
     let resp = handle(&session, req(9, "tools/list", json!({}))).await.expect("response");

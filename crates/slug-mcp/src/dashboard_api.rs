@@ -117,6 +117,58 @@ pub fn brain_ready() -> Result<(), String> {
     }
 }
 
+// ------------------------------- heartbeat ----------------------------------
+//
+// "Is an MCP client connected" can't be answered from in-process state alone:
+// the HTTP daemon (serving the dashboard) and the stdio server Claude Code
+// spawns are **separate OS processes** with separate memory. A client driving
+// Slug over stdio never touches the daemon's process at all, so an in-memory
+// counter on the daemon would forever show "disconnected" even while you're
+// actively using Slug from Claude Code. Both transports instead stamp a shared
+// file on every request; the dashboard reads it to learn the freshest contact,
+// regardless of which process or transport produced it.
+
+fn heartbeat_path() -> PathBuf {
+    std::env::var("SLUG_HEARTBEAT").map(PathBuf::from).unwrap_or_else(|_| slug_home().join("heartbeat.json"))
+}
+
+/// Stamp "a client just talked to us over `transport`" (`"stdio"` | `"http"`).
+/// Best-effort: a failed write must never break request handling.
+pub fn record_heartbeat(transport: &str) {
+    let body = json!({ "transport": transport, "pid": std::process::id(), "ts": now_unix_secs() });
+    let path = heartbeat_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, body.to_string());
+}
+
+/// Read the last heartbeat, if any client has ever connected.
+fn read_heartbeat() -> Option<Value> {
+    let text = std::fs::read_to_string(heartbeat_path()).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Whether an MCP client (either transport) has been seen within the last
+/// `fresh_secs` seconds, and which transport/age that was — for the dashboard's
+/// "client connected" indicator.
+pub fn client_status(fresh_secs: u64) -> Value {
+    let Some(hb) = read_heartbeat() else {
+        return json!({ "connected": false, "transport": Value::Null, "last_seen_s": Value::Null });
+    };
+    let ts = hb.get("ts").and_then(Value::as_u64).unwrap_or(0);
+    let age = now_unix_secs().saturating_sub(ts);
+    json!({
+        "connected": age < fresh_secs,
+        "transport": hb.get("transport").cloned().unwrap_or(Value::Null),
+        "last_seen_s": age,
+    })
+}
+
 /// Brain summary for the dashboard header: provider, model, cloud/local, the key
 /// env var, and whether the built-in agent is ready to run.
 pub fn brain_detail() -> Value {

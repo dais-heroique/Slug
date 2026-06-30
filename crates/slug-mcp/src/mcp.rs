@@ -393,6 +393,16 @@ pub fn tool_definitions() -> Vec<Value> {
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         }),
         json!({
+            "name": "slug_status",
+            "description": "One-shot health/status report, printed directly in this chat: \
+                app version, configured AI brain (provider/model/ready), which transport an \
+                MCP client is connected over, accessibility-bus connectivity, pending \
+                destructive-action approvals, and the built-in agent's current task if one is \
+                running. This is the dashboard's content as text — call it when you want a \
+                status check without leaving the chat or opening a browser.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }),
+        json!({
             "name": "slug_agent_start_task",
             "description": "Start the slug-brain agent on a natural-language task. Drives \
                 the UI autonomously via the same tools (observe→reason→act→verify).",
@@ -487,6 +497,7 @@ async fn handle_tool_call(
         "slug_wait_for" => tool_wait_for(session, &args).await,
         "slug_list_apps" => tool_list_apps(session).await,
         "slug_help" => Ok(help_text()),
+        "slug_status" => tool_status(session, control).await,
         name if name.starts_with("slug_agent_") => match control {
             Some(ctrl) => agent_tool(ctrl, name, &args).await,
             None => Err("agent control is not available on this transport".into()),
@@ -551,7 +562,9 @@ move in ONE call with slug_sequence, e.g. \
 steal focus mid-sequence. Or pass activate:\"App\" to slug_key/slug_click to \
 foreground it first in the same call. slug_activate {app} just brings it to front.\n\
 OTHER: slug_launch {name, uri?} (uri jumps straight to a page/state); \
-slug_list_apps. slug_wait_for often times out — prefer snapshotting again.\n\
+slug_list_apps. slug_wait_for often times out — prefer snapshotting again. \
+slug_status prints a one-shot health report (brain, connection, pending approvals, \
+running agent task) right here in the chat — no dashboard needed.\n\
 RULES: refs change whenever the UI changes — re-snapshot, never reuse old refs. \
 Destructive actions (delete/send/buy/submit) may pause for human approval in the \
 dashboard. Prefer slug_invoke on a ref over raw coordinates."
@@ -805,5 +818,68 @@ async fn tool_list_apps(session: &Arc<Session>) -> std::result::Result<String, S
     for a in apps {
         out.push_str(&format!("- {} [{}]\n", if a.app_id.is_empty() { "<unnamed>" } else { &a.app_id }, a.bus_name));
     }
+    Ok(out)
+}
+
+/// `slug_status` — the dashboard's content as text, printed straight into the
+/// chat. Built for clients (like Claude Code over stdio) that can't open a
+/// browser to see `GET /dashboard`: app version, brain, which transport is
+/// connected, bus reachability, pending approvals, and any running agent task.
+async fn tool_status(
+    session: &Arc<Session>,
+    control: Option<&Arc<AgentController>>,
+) -> std::result::Result<String, String> {
+    let mut out = String::new();
+    out.push_str(&format!("Slug v{}\n", env!("CARGO_PKG_VERSION")));
+
+    let brain = crate::dashboard_api::brain_detail();
+    out.push_str(&format!(
+        "Brain: {} / {} [{}] — {}\n",
+        brain.get("provider").and_then(Value::as_str).unwrap_or("?"),
+        brain.get("model").and_then(Value::as_str).unwrap_or("?"),
+        brain.get("location").and_then(Value::as_str).unwrap_or("?"),
+        if brain.get("ready").and_then(Value::as_bool).unwrap_or(false) { "ready" } else { "not ready" },
+    ));
+
+    let client = crate::dashboard_api::client_status(60);
+    out.push_str(&match client.get("connected").and_then(Value::as_bool).unwrap_or(false) {
+        true => format!(
+            "MCP client: connected via {} ({}s ago)\n",
+            client.get("transport").and_then(Value::as_str).unwrap_or("?"),
+            client.get("last_seen_s").and_then(Value::as_u64).unwrap_or(0),
+        ),
+        false => "MCP client: no recent client seen\n".to_string(),
+    });
+
+    match session.list_apps().await {
+        Ok(apps) => out.push_str(&format!("Accessibility bus: connected ({} app(s) visible)\n", apps.len())),
+        Err(e) => out.push_str(&format!("Accessibility bus: NOT connected ({e})\n")),
+    }
+
+    match control {
+        Some(ctrl) => {
+            let pending = ctrl.approvals().list().await;
+            let pending_n = pending.get("pending").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
+            out.push_str(&format!("Pending approvals: {pending_n}\n"));
+
+            let status = ctrl.status().await;
+            let agent_status = status.get("status").and_then(Value::as_str).unwrap_or("idle");
+            if agent_status == "idle" {
+                out.push_str("Agent task: none running\n");
+            } else {
+                out.push_str(&format!(
+                    "Agent task: {} (status={}, paused={}, steps={}, elapsed={}s)\n  {}\n",
+                    status.get("task").and_then(Value::as_str).unwrap_or("?"),
+                    agent_status,
+                    status.get("paused").and_then(Value::as_bool).unwrap_or(false),
+                    status.get("steps").and_then(Value::as_u64).unwrap_or(0),
+                    status.get("elapsed_s").and_then(Value::as_u64).unwrap_or(0),
+                    status.get("log").and_then(Value::as_array).and_then(|l| l.last()).and_then(Value::as_str).unwrap_or(""),
+                ));
+            }
+        }
+        None => out.push_str("Agent control: not available on this transport\n"),
+    }
+
     Ok(out)
 }

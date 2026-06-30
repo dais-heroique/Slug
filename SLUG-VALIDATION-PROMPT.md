@@ -15,10 +15,15 @@ Ne t'arrête pas sauf si le test lui-même l'exige. À la fin, imprime le tablea
 **V0-2 · slug_list_apps**
 `slug_list_apps {}` → `isError:false`, au moins une app listée (Finder est toujours là).
 
-**V0-3 · tools/list — 11 outils présents**
+**V0-3 · tools/list — 12 outils présents**
 Vérifie que ces noms sont tous dans la liste :
 `slug_snapshot slug_invoke slug_launch slug_click slug_scroll slug_key
-slug_activate slug_sequence slug_wait_for slug_list_apps slug_help`
+slug_activate slug_sequence slug_wait_for slug_list_apps slug_help slug_status`
+
+**V0-4 · slug_status — rapport texte sans dashboard**
+`slug_status {}` → `isError:false`, le texte contient `Brain:`, `Accessibility bus:`
+et soit `MCP client: connected via stdio` (tu es connecté en stdio, donc ça doit
+dire stdio, pas http) soit un avertissement clair si aucun heartbeat récent.
 
 ---
 

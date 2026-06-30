@@ -305,7 +305,8 @@ async function refreshInfo(){
     }
     const c=i.client||{};
     clientConnected=!!c.connected;
-    document.getElementById('clientTxt').textContent=c.connected?'MCP client connected':'no client';
+    const via=c.transport==='stdio'?' (Claude Code, stdio)':c.transport==='http'?' (HTTP)':'';
+    document.getElementById('clientTxt').textContent=c.connected?('MCP client connected'+via):'no client';
     setDot('clientDot', c.connected?'ok':'');
     document.getElementById('clientHint').hidden=!(c.connected && !b.ready);
   }catch(e){}

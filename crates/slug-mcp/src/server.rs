@@ -36,6 +36,9 @@ pub async fn run_stdio(session: Arc<Session>, control: Arc<AgentController>) -> 
             }
         };
 
+        // Record contact regardless of method — even tools/list keeps the
+        // dashboard's "connected" indicator alive (see dashboard_api::record_heartbeat).
+        crate::dashboard_api::record_heartbeat("stdio");
         if let Some(resp) = mcp::handle_with_control(&session, Some(control.clone()), req).await {
             let body = serde_json::to_string(&resp)?;
             write_line(&mut stdout, &body).await?;
@@ -79,23 +82,11 @@ pub async fn run_http(
     use axum::{Json, Router};
     use serde_json::Value;
 
-    use std::sync::atomic::{AtomicU64, Ordering};
-
     #[derive(Clone)]
     struct AppState {
         session: Arc<Session>,
         control: Arc<AgentController>,
         port: u16,
-        /// Unix-seconds of the last MCP client request (0 = never) — powers the
-        /// "an MCP client is connected" indicator on the dashboard.
-        last_seen: Arc<AtomicU64>,
-    }
-
-    fn now_secs() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
     }
 
     async fn mcp_endpoint(
@@ -104,7 +95,9 @@ pub async fn run_http(
         body: axum::body::Bytes,
     ) -> axum::response::Response {
         // Record that a real MCP client just talked to us (for the dashboard).
-        state.last_seen.store(now_secs(), Ordering::Relaxed);
+        // Shared across processes — see dashboard_api::record_heartbeat for why
+        // an in-memory counter here can't see a client connected over stdio.
+        crate::dashboard_api::record_heartbeat("http");
         // Security: this localhost server can read screen content and drive the
         // desktop, so it must not be reachable from a web page in the user's
         // browser (DNS-rebinding / CSRF). Reject any request whose Origin or Host
@@ -184,18 +177,13 @@ pub async fn run_http(
         if !local_request_ok(&headers) {
             return StatusCode::FORBIDDEN.into_response();
         }
-        let last = state.last_seen.load(Ordering::Relaxed);
-        let age = now_secs().saturating_sub(last);
         Json(serde_json::json!({
             "app": "Slug",
             "version": env!("CARGO_PKG_VERSION"),
             "transport": "http",
             "port": state.port,
             "brain": crate::dashboard_api::brain_detail(),
-            "client": {
-                "connected": last != 0 && age < 60,
-                "last_seen_s": if last == 0 { Value::Null } else { Value::from(age) },
-            },
+            "client": crate::dashboard_api::client_status(60),
         }))
         .into_response()
     }
@@ -357,12 +345,7 @@ pub async fn run_http(
         .route("/providers", get(providers_get).post(providers_set))
         .route("/provider-key", post(provider_key).delete(provider_key_forget))
         .route("/healthz", get(|| async { "ok" }))
-        .with_state(AppState {
-            session,
-            control,
-            port: addr.port(),
-            last_seen: Arc::new(AtomicU64::new(0)),
-        });
+        .with_state(AppState { session, control, port: addr.port() });
 
     info!(%addr, "slug-mcp listening on streamable HTTP at POST /mcp (dashboard at GET /dashboard)");
     let listener = tokio::net::TcpListener::bind(addr).await?;

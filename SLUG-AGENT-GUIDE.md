@@ -232,6 +232,18 @@ page loading) instead of re-snapshotting in a busy loop. Returns the event, or
 Lists running apps exposing an accessibility tree. Use to discover what's open
 before a `desktop` snapshot.
 
+### `slug_status`
+```json
+{}
+```
+One-shot health report printed directly in chat — the dashboard's content as
+text, for clients (like Claude Code over stdio) that can't open a browser:
+app version, AI brain (provider/model/ready), which transport an MCP client
+is connected over, accessibility-bus reachability, pending destructive-action
+approvals, and the built-in agent's current task if one is running. Call this
+instead of `GET /dashboard` when you just need a status check without
+leaving the conversation.
+
 ---
 
 ## 3. Efficient patterns (copy these)
