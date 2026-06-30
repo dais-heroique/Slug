@@ -80,6 +80,13 @@ Slug. Say so plainly instead of trying.
 - `focused` / `window` → the OS-frontmost top-level window (small, fast — but it's
   whatever the OS focused; prefer `app` to be sure you read the right one).
 - `desktop` → every running app across all monitors (use to locate an app/window).
+- **macOS footgun: a stray click/key near the top of the screen (y < ~24) opens
+  the system menu bar** (Apple menu, app menu, clock…), and `scope:"focused"`/
+  `"window"` will then dutifully snapshot *that* instead of your app — you get a
+  page of unrelated menu items and have wasted a round-trip closing it. `app:"…"`
+  is immune to this since it always reads the named app's own tree regardless of
+  what the OS currently has focused; prefer it whenever you're repeatedly
+  snapshotting one app. If you do need a raw `slug_click`/`slug_key`, avoid y < 24.
 
 **The fast path — filter server-side, don't pull the whole tree.** A real web
 page is tens of thousands of characters; reading it all is what makes you slow.
@@ -108,7 +115,8 @@ Precise filters:
 
 **Role groups** (besides exact role names like `button`, `entry`, `static_text`):
 `clickable` = any actionable control, `field`/`input` = text entries/combos/spinners,
-`text` = static text/labels/headings, `link`, `heading`.
+`text` = static text/labels/headings, `link`, `heading`, `price`/`money`/`currency` =
+any label that *looks like* a currency amount, regardless of its actual role.
 
 Omit all filters only when you genuinely need the *structure* (hierarchy) of the
 window. Exact `roles` values are the lower-case role names exactly as printed in a
@@ -118,19 +126,23 @@ snapshot (`button`, `entry`, `link`, `heading`, `static_text`, `combo_box`, …)
 it does not pull the whole tree first and then cap it. `{ limit: 30 }` alone is
 enough to keep a dense page small.
 
-**On a dense page (e.g. an e-commerce search results page), an unfiltered
-snapshot is truncated past ~20k characters** with a note telling you to narrow
-it — full unfiltered dumps of pages like this can run to hundreds of KB, which
-overflows your own tool-result limit and forces a slow file-dump-and-grep
-fallback. Don't try to raise this with a `depth` or `max_chars` argument —
-neither exists. Narrow with `filter`/`roles`/`interactive_only`/`limit` instead.
+**Both the filtered and the unfiltered path are capped past ~20k characters** —
+whichever you use, an oversized result is truncated with a note telling you to
+narrow it (lower `limit`, or add `roles`/`filter`/`interactive_only`). Full
+unfiltered dumps of a dense page (e.g. an e-commerce search results page) can run
+to hundreds of KB, which overflows your own tool-result limit and forces a slow
+file-dump-and-grep fallback — the cap exists specifically to prevent that. Don't
+try to raise it with a `depth` or `max_chars` argument — neither exists.
 
-**Prices, ratings, and similar text don't reliably match a currency symbol** —
-Amazon prints "EUR 26.32", not "$26.32", so `filter: "$"` finds nothing. For
-this kind of scan, prefer a role-only sweep with a generous limit —
-`{ roles: ["text"], limit: 200 }` (or scope to one product card via `app`/a
-nested `filter` on the product name) — and read the values out of that flat
-list instead of guessing a currency-specific substring.
+**Prices don't reliably match a currency symbol** — Amazon prints "EUR 26.32",
+not "$26.32", so `filter: "$"` finds nothing. Use `{ roles: ["price"] }` instead:
+it matches currency-shaped text ($19.99, 26,32 €, EUR 26.32, …) by content, in
+whatever role the site happens to render it (link, static text, span — doesn't
+matter). Combine with a high `limit` to sweep an entire results page in **one
+call**: `{ app: "Safari", roles: ["price"], limit: 100, coords: true }` returns
+every price on the page with refs and click-fallback coordinates — pair it with
+one `{ roles: ["link"], limit: 100 }` call for the product titles instead of
+grepping a full-page dump or re-snapshotting per product.
 
 ### `slug_invoke`
 ```json
@@ -367,6 +379,15 @@ conflict:
     - Chess move played: `slug_snapshot { roles: ["static_text"], limit: 200 }` → read notation.
     - Form saved: `slug_snapshot { filter: "saved" }` or check the field's new state.
 
+12. **On macOS, a stray `slug_click`/`slug_key` near the top of the screen
+    (y < ~24) can pop the system menu bar** (Apple menu, app menu, clock, …).
+    If a `scope:"focused"`/`"window"` snapshot suddenly comes back full of
+    unrelated menu items instead of your app, that's almost certainly what
+    happened — close the menu (`slug_key {keys:"escape"}`) and re-snapshot.
+    `app:"…"` targeting sidesteps this entirely since it reads the named app's
+    tree regardless of what the OS currently has focused; prefer it over
+    `scope` for any multi-step flow in one app.
+
 ### App-specific fast paths
 
 **Chess blitz (chess.com) — minimise per-move latency**
@@ -387,6 +408,25 @@ no nodes anyway, so a full snapshot tells you nothing a filtered one doesn't.
 3. Pick the button on the row you want (ignore any with X < 0 — off-screen)
 4. slug_invoke ref=bXXX action=click  (repeat for each item)
 ```
+Always pass `app: "Safari"` on every call in a multi-step Amazon flow (not just
+`scope: "focused"`) — it's immune to OS-focus drift, including the system menu
+bar popping open after a stray click near screen-top.
+
+**Amazon — compare N products by price/rating in ~2 calls instead of dozens**
+```
+1. slug_launch Safari uri=https://www.amazon.fr/s?k=PRODUIT+ENCODE
+2. slug_snapshot { app: "Safari", roles: ["link"], filter: "PRODUIT", limit: 50 }
+   # product titles — each line is a candidate product
+3. slug_snapshot { app: "Safari", roles: ["price"], limit: 50, coords: true }
+   # every price on the page in one call — matches "$19.99", "26,32 €", "EUR 26.32"
+   # all at once, no need to guess a currency symbol
+4. Correlate titles ↔ prices by their order/position in the two flat lists (both
+   reflect on-page reading order), then slug_invoke click on the chosen product.
+```
+This replaces reading the whole page and grepping for `$`/`€` by hand — that
+literal-symbol approach misses results in non-US currency formats and, on a
+dense results page, risks tripping the ~20k-char truncation cap before you even
+reach the prices.
 
 **Gmail — compose and send/draft**
 ```

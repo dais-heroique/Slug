@@ -64,10 +64,19 @@ Deux stratégies possibles, choisis-en une et dis laquelle dans ton rapport :
   résultats (généralement le premier `role:"link"` dont le texte contient un
   nom de marque/produit, pas une bannière publicitaire "Sponsorisé" — ignore
   les liens marqués "Sponsored"/"Sponsorisé" si tu peux les distinguer).
-- **B. Meilleur rapport qualité/prix** : `slug_snapshot { "app": "Safari", "filter": "microphone", "limit": 30, "coords": true }`,
-  lis les prix et notes (étoiles) affichés dans le texte des nœuds, choisis le
-  produit avec le meilleur ratio note/prix parmi les 5-10 premiers résultats
-  (évite les extrêmes : un produit à 2 notes ou à un prix anormalement bas).
+- **B. Meilleur rapport qualité/prix** : ne tente pas de filtrer sur `$`/`€` —
+  le symbole n'apparaît pas toujours littéralement dans le texte (ex.
+  "26,32 €" ou "EUR 26,32"). Utilise plutôt deux appels filtrés en parallèle :
+  `slug_snapshot { "app": "Safari", "roles": ["link"], "filter": "microphone", "limit": 15 }`
+  pour les titres produits, et
+  `slug_snapshot { "app": "Safari", "roles": ["price"], "limit": 15, "coords": true }`
+  pour tous les prix de la page en un seul appel (le groupe `price` matche tout
+  label qui ressemble à un montant — symbole ou code devise — quel que soit son
+  rôle d'accessibilité). Corrèle les deux par ordre d'apparition dans le
+  document, lis aussi les notes (étoiles) dans le texte des nœuds si besoin, et
+  choisis le produit avec le meilleur ratio note/prix parmi les 5-10 premiers
+  résultats (évite les extrêmes : un produit à 2 notes ou à un prix
+  anormalement bas).
 
 `slug_invoke { "ref": "<ref du lien produit>", "action": "click", "reasoning": "ouvrir la fiche produit" }`
 → `isError:false`. Attends 2s.

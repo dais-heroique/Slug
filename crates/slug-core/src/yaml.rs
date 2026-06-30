@@ -173,8 +173,11 @@ fn filter_matches(
     if interactive_only && !node.role.is_interactive() {
         return false;
     }
-    if !roles.is_empty() && !roles.iter().any(|r| role_matches_token(node.role, r)) {
-        return false;
+    if !roles.is_empty() {
+        let label = node.display_label().unwrap_or("");
+        if !roles.iter().any(|r| role_matches_token(node.role, r, label)) {
+            return false;
+        }
     }
     if let Some(needle) = needle {
         let label = node.display_label().unwrap_or("").to_ascii_lowercase();
@@ -185,12 +188,16 @@ fn filter_matches(
     true
 }
 
-/// Match a requested `roles` token against a node's role. A token is either an
-/// exact lower-case role name (`button`, `entry`, `static_text`, …) or a friendly
-/// **group**: `clickable` (any actionable control), `field`/`input` (text entries,
-/// combos, spinners), `text` (static text / labels / paragraphs / headings),
-/// `link`, `heading`.
-fn role_matches_token(role: SlugRole, token: &str) -> bool {
+/// Match a requested `roles` token against a node's role (and, for `price`,
+/// its label). A token is either an exact lower-case role name (`button`,
+/// `entry`, `static_text`, …) or a friendly **group**: `clickable` (any
+/// actionable control), `field`/`input` (text entries, combos, spinners),
+/// `text` (static text / labels / paragraphs / headings), `link`, `heading`,
+/// `price`/`money` (any label that looks like a currency amount, in whatever
+/// role it's rendered in — Amazon-style storefronts put the price in a plain
+/// link or span, not a dedicated "price" role, so this matches on content,
+/// not role).
+fn role_matches_token(role: SlugRole, token: &str, label: &str) -> bool {
     use SlugRole::*;
     let t = token.trim().to_ascii_lowercase();
     match t.as_str() {
@@ -202,8 +209,39 @@ fn role_matches_token(role: SlugRole, token: &str) -> bool {
         "text" => matches!(role, StaticText | Label | Paragraph | Heading | Caption),
         "link" => role == Link,
         "heading" | "title" => role == Heading,
+        "price" | "money" | "currency" => looks_like_price(label),
         other => role.yaml_name() == other,
     }
+}
+
+/// Currency symbols recognised by [`looks_like_price`]. Deliberately broad —
+/// false positives just mean an extra line in an already-filtered result;
+/// false negatives mean the agent can't find the price at all.
+const CURRENCY_SYMBOLS: &[char] = &['$', '€', '£', '¥', '₹', '₩', '₽', '₺', '₫', '₪', '฿', '¢'];
+
+/// ISO-4217-ish currency codes seen as a whole word next to an amount
+/// (`"EUR 26,32"`, `"26.32 USD"`). Lower-case; matched case-insensitively.
+const CURRENCY_CODES: &[&str] = &[
+    "eur", "usd", "gbp", "chf", "jpy", "cad", "aud", "cny", "inr", "sek", "nok", "dkk", "pln",
+    "czk", "huf", "brl", "mxn", "zar", "krw", "try", "rub", "sgd", "hkd", "nzd",
+];
+
+/// Whether a label looks like a currency amount — a currency symbol/code plus
+/// a digit, in either order (`"$26.32"`, `"26,32 €"`, `"EUR 26,32"`). Content
+/// based, not regex (no `regex` dependency in this crate): a plain symbol/code
+/// scan is enough to separate "price-shaped" text from star ratings, review
+/// counts, or quantities, which carry digits but never a currency marker.
+fn looks_like_price(label: &str) -> bool {
+    let has_digit = label.chars().any(|c| c.is_ascii_digit());
+    if !has_digit {
+        return false;
+    }
+    if label.chars().any(|c| CURRENCY_SYMBOLS.contains(&c)) {
+        return true;
+    }
+    label
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| !w.is_empty() && CURRENCY_CODES.contains(&w.to_ascii_lowercase().as_str()))
 }
 
 /// Score a node's label against the query: 0 exact, 1 prefix, 2 word-boundary,
@@ -409,6 +447,55 @@ mod tests {
         // exact role still works.
         let txt = render_filtered(&doc, &aliases, None, &["static_text".to_string()], false, 50, false);
         assert!(txt.contains("1. e4 e5") && !txt.contains("button"));
+    }
+
+    #[test]
+    fn price_group_matches_currency_text_regardless_of_role_or_symbol() {
+        let mut win = SlugNode::new("W", SlugRole::Window);
+        win.child_refs = vec!["P1".into(), "P2".into(), "P3".into(), "R".into(), "Q".into()];
+
+        // European-style amount with the symbol after the number, in a plain
+        // static text node (no literal "$" anywhere — this is the exact shape
+        // that defeated a literal `filter:"$"` against an Amazon.fr page).
+        let mut p1 = SlugNode::new("P1", SlugRole::StaticText);
+        p1.parent_ref = Some("W".into());
+        p1.text_content = Some("26,32 €".into());
+
+        // US-style amount, symbol-first, wrapped in a Link (Amazon often makes
+        // the price clickable as part of the product link).
+        let mut p2 = SlugNode::new("P2", SlugRole::Link);
+        p2.parent_ref = Some("W".into());
+        p2.name = Some("$19.99".into());
+
+        // Currency-code form with no symbol at all.
+        let mut p3 = SlugNode::new("P3", SlugRole::StaticText);
+        p3.parent_ref = Some("W".into());
+        p3.text_content = Some("EUR 26,32".into());
+
+        // A star rating and a review count: both carry digits but no currency
+        // marker, so they must NOT be swept up by the price filter.
+        let mut rating = SlugNode::new("R", SlugRole::StaticText);
+        rating.parent_ref = Some("W".into());
+        rating.text_content = Some("4.5 out of 5 stars".into());
+        let mut reviews = SlugNode::new("Q", SlugRole::StaticText);
+        reviews.parent_ref = Some("W".into());
+        reviews.text_content = Some("2,014 ratings".into());
+
+        let doc = SlugDocument::from_nodes([win, p1, p2, p3, rating, reviews]);
+        let aliases = aliased(&doc);
+
+        let prices = render_filtered(&doc, &aliases, None, &["price".to_string()], false, 50, false);
+        assert!(prices.contains("26,32 €"), "got: {prices}");
+        assert!(prices.contains("$19.99"), "got: {prices}");
+        assert!(prices.contains("EUR 26,32"), "got: {prices}");
+        assert!(!prices.contains("stars"), "rating leaked into price filter: {prices}");
+        assert!(!prices.contains("ratings"), "review count leaked into price filter: {prices}");
+
+        // "money" and "currency" are accepted aliases for the same group.
+        let alias1 = render_filtered(&doc, &aliases, None, &["money".to_string()], false, 50, false);
+        let alias2 = render_filtered(&doc, &aliases, None, &["currency".to_string()], false, 50, false);
+        assert_eq!(prices, alias1);
+        assert_eq!(prices, alias2);
     }
 
     #[test]

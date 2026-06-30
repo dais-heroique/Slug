@@ -157,18 +157,26 @@ pub fn tool_definitions() -> Vec<Value> {
                         "description": "Snapshot THIS app by name (e.g. 'Notes', 'Spotify'), \
                             regardless of OS focus. USE THIS when you drive Slug from another \
                             window (e.g. a terminal): 'focused' reflects the OS-frontmost window, \
-                            which is often your own client, not the app you mean. Matched \
-                            case-insensitively. Overrides 'scope'."
+                            which is often your own client, not the app you mean. It also avoids a \
+                            specific footgun: a stray click/key near screen-top can pop the OS menu \
+                            bar (Apple menu on macOS) or another system overlay, and a focus-tracking \
+                            scope will then faithfully snapshot THAT instead of your app, wasting a \
+                            round-trip on unrelated menu items. 'app' is immune to this — it always \
+                            reads the named app's own tree. Matched case-insensitively. Overrides \
+                            'scope'. Prefer this over 'scope' whenever you're driving one named app \
+                            (a browser, an editor, …) across multiple calls."
                     },
                     "scope": {
                         "type": "string",
                         "enum": ["focused", "window", "desktop"],
                         "description": "focused/window = the OS-frontmost top-level window (fast, \
-                            but it is whatever the OS focused — may be your controlling client; \
-                            prefer the 'app' param to target a specific app); desktop = every \
-                            running application across ALL monitors. Coordinates are global screen \
-                            space, so @x,y from any scope works on a multi-monitor setup (a window \
-                            on a second screen may have large or negative x — normal, pass as-is).",
+                            but it is whatever the OS focused — may be your controlling client, the \
+                            system menu bar after a stray click, or any other app that stole focus; \
+                            prefer the 'app' param to target a specific app reliably); desktop = \
+                            every running application across ALL monitors. Coordinates are global \
+                            screen space, so @x,y from any scope works on a multi-monitor setup (a \
+                            window on a second screen may have large or negative x — normal, pass \
+                            as-is).",
                         "default": "window"
                     },
                     "filter": {
@@ -185,9 +193,15 @@ pub fn tool_definitions() -> Vec<Value> {
                             (e.g. [\"button\"], [\"entry\"], [\"static_text\"], [\"link\"]) \
                             or a friendly GROUP: \"clickable\" (any actionable control), \
                             \"field\"/\"input\" (text entries, combos, spinners), \"text\" \
-                            (static text/labels/headings), \"link\", \"heading\". \
-                            Searching for a button? pass roles:[\"button\"] and you get ONLY \
-                            buttons. Combine with filter."
+                            (static text/labels/headings), \"link\", \"heading\", \"price\" \
+                            (alias \"money\"/\"currency\" — any label that LOOKS like a \
+                            currency amount, e.g. \"$19.99\", \"26,32 €\", \"EUR 26,32\", \
+                            matched on content not role, since storefronts rarely use a \
+                            dedicated price role). Searching for a button? pass \
+                            roles:[\"button\"] and you get ONLY buttons. Don't try to \
+                            filter:\"$\" for a price — currencies aren't always a literal \
+                            symbol (\"26,32 €\" has none); use roles:[\"price\"] instead. \
+                            Combine with filter."
                     },
                     "interactive_only": {
                         "type": "boolean",
@@ -263,7 +277,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 (x, y) — these span all monitors, so a point on a second screen (possibly with \
                 large or negative x) just works. Lets the agent click ANYWHERE, including inside \
                 opaque apps, when it has a position (e.g. @x,y from a filtered snapshot). No pixels \
-                are captured. macOS + Windows.",
+                are captured. macOS + Windows. CAUTION on macOS: y below ~24 is the system menu \
+                bar (Apple menu, app menu, clock, …) on the screen it belongs to, not app content \
+                — clicking there opens a system menu instead of your target and pollutes the next \
+                snapshot with menu items. Prefer slug_invoke on a ref for anything near the top of \
+                the screen.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -548,14 +566,19 @@ screenshots).\n\
 WORKFLOW: slug_launch (open app) → slug_snapshot (read) → slug_invoke (act on a \
 ref) → slug_snapshot again to verify.\n\
 TARGET THE RIGHT APP: if you drive Slug from another window (e.g. a terminal), \
-scope:\"focused\" reads the OS-frontmost window (often your own client), so pass \
-app:\"Notes\" to snapshot a specific app regardless of focus.\n\
+scope:\"focused\" reads the OS-frontmost window — often your own client, or (on \
+macOS) the system menu bar if a stray click/key near screen-top popped it open. \
+Pass app:\"Notes\" to snapshot a specific app regardless of focus or stray \
+overlays; prefer it over scope whenever you're driving one named app repeatedly.\n\
 FIND FAST (saves tokens — don't pull the whole tree): \
 slug_snapshot {app:\"Safari\", roles:[…], filter:\"text\", limit:1}. \
 roles take exact names (button, entry, static_text, link…) OR groups \
-(clickable, field, text, link, heading). Returns only matches as `role \"name\" \
-[ref]`; exact-name match ranks first, so limit:1 gives the one you meant. Add \
-coords:true to also get @x,y.\n\
+(clickable, field, text, link, heading, price/money/currency — matches \
+currency-shaped text like \"$19.99\" or \"26,32 €\" by content, no literal \
+symbol needed). Returns only matches as `role \"name\" [ref]`; exact-name match \
+ranks first, so limit:1 gives the one you meant. Add coords:true to also get \
+@x,y. To read many items (e.g. a product grid) in one call instead of dozens, \
+raise limit (e.g. 100) rather than re-snapshotting per item.\n\
 ACT: slug_invoke {ref, action:\"click\"|\"set_text\"|\"set_value\"|\"focus\"|\"toggle\"|…, \
 args, reasoning}. Forms: set_text every field, then click submit last.\n\
 NO ACCESSIBLE TREE (canvas/games): slug_click {x,y}, slug_scroll {x,y,dy} (dy<0 = \
@@ -632,24 +655,31 @@ async fn tool_snapshot(session: &Arc<Session>, args: &Value) -> std::result::Res
             text.push_str(&format!("#   - {} ({:?})\n", c.app_id, c.opaque.unwrap()));
         }
     }
-    // If an unfiltered snapshot came back large, nudge the agent to filter next
-    // time — this keeps any client token-efficient without it reading the docs.
-    // Past SNAPSHOT_HARD_CAP we don't just nudge, we truncate: dense pages (e.g.
-    // an e-commerce search/product page) can render hundreds of KB of YAML for
-    // the full tree, which blows straight past a calling client's own
-    // tool-result size limit — that overflow has been observed in practice to
-    // force a slow file-dump-and-grep fallback that takes minutes instead of
-    // seconds. Returning a truncated tree with clear next steps is strictly
-    // better than returning everything and letting the caller's transport choke.
-    if !active && text.len() > SNAPSHOT_HARD_CAP_CHARS {
+    // Nudge the agent to narrow next time once a result gets large — this keeps
+    // any client token-efficient without it reading the docs. Past
+    // SNAPSHOT_HARD_CAP we don't just nudge, we truncate: dense pages (e.g. an
+    // e-commerce search/product page) can render hundreds of KB of YAML for the
+    // full tree, and even a filtered sweep with a generous 'limit' on such a
+    // page can still balloon — both blow straight past a calling client's own
+    // tool-result size limit, which has been observed in practice to force a
+    // slow file-dump-and-grep fallback that takes minutes instead of seconds.
+    // Returning a truncated result with clear next steps beats returning
+    // everything and letting the caller's transport choke, in either mode.
+    if text.len() > SNAPSHOT_HARD_CAP_CHARS {
         truncate_at_char_boundary(&mut text, SNAPSHOT_HARD_CAP_CHARS);
+        let advice = if active {
+            "lower 'limit' (or narrow 'roles'/'filter'/'interactive_only' further) — \
+             this filtered result is still too large."
+        } else {
+            "this page is too dense for a full dump; narrow it instead: \
+             slug_snapshot {roles:[\"button\"|\"link\"|\"text\"|\"price\"], filter:\"text\", \
+             limit:20} or {interactive_only:true, limit:50}. For prices/ratings that won't \
+             match a literal symbol (e.g. \"26,32 €\" has no \"$\"), use roles:[\"price\"] \
+             rather than guessing a filter string."
+        };
         text.push_str(&format!(
-            "\n# … truncated at {SNAPSHOT_HARD_CAP_CHARS} chars — the full tree is much larger \
-             and would likely overflow your own result limits. This page is too dense for a full \
-             dump; narrow it instead: slug_snapshot {{roles:[\"button\"|\"link\"|\"text\"], \
-             filter:\"text\", limit:20}} or {{interactive_only:true, limit:50}}. For text content \
-             like prices/ratings that won't match a literal symbol (e.g. \"EUR 26.32\" has no \
-             \"$\"), prefer roles:[\"text\"] with a generous limit over guessing a filter string.\n"
+            "\n# … truncated at {SNAPSHOT_HARD_CAP_CHARS} chars — the untruncated result was \
+             much larger and would likely overflow your own result limits. {advice}\n"
         ));
     } else if !active && text.len() > SNAPSHOT_TIP_THRESHOLD_CHARS {
         text.push_str(
