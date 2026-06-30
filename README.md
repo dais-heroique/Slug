@@ -43,6 +43,10 @@ semantic model (`slug-core`), the MCP server (`slug-mcp`), and the agent
 | `slug-mcp`    | The MCP server: JSON-RPC 2.0 over **stdio** and **streamable HTTP**, exposing the perception/action and agent-control tools (see [Tools](#tools)). This is the session layer that maps internal ULID refs to short agent-facing aliases (`b1`, `e5`), and it enforces the destructive-action [approval gate](#safety) for external clients. |
 | `slug-cli`    | A `slug` binary for driving the bus by hand (snapshot, list apps, invoke actions, stream live events). |
 | `slug-brain`  | A hybrid agentic loop (`slug-agent`) that drives the MCP tools. **Multi-provider**: Claude, OpenAI/OpenRouter/any OpenAI-compatible server, Gemini, or local Ollama — chosen in `slug.toml` or auto-selected from detected hardware. See [Providers](#providers-multi-provider-brain). |
+| `slug-ui`     | A retained-mode, declarative **"UI-as-data"** GUI toolkit whose [AccessKit](https://crates.io/crates/accesskit) semantic tree is derived **automatically and completely** from the same widget tree that renders — opaque widgets are impossible. Exports to the bus over a Unix socket. See [slug-ui: the app SDK](#slug-ui-the-app-sdk). |
+| `slug-notes`  | A notes-editor demo built with `slug-ui`; an agent drives it through the bus with zero vision (integration-tested). |
+| `slug-ui-ffi` | C ABI for the `slug-ui` SDK (cbindgen-generated header), mirroring AccessKit's binding strategy. |
+| `slug-ui-py`  | Python (PyO3) binding for the `slug-ui` SDK. |
 
 ```
 agent ──MCP──► slug-mcp ──► slug-bridge ──UI Automation / AX──► applications
@@ -492,6 +496,100 @@ ollama). The `--probe` report recommends a provider too.
 `slug-brain` ships unit tests for the tiering logic (mocked probes) and a scripted
 backend that exercises the full loop, the caps, and the destructive gate without
 a network or a bus.
+
+## slug-ui: the app SDK
+
+`slug-ui` flips the bridge around. Instead of *recovering* semantics from a
+toolkit after the fact (AT-SPI/UIA/AX), an app built with `slug-ui` is semantic
+**by construction**: the accessibility tree is derived from the same widget tree
+that renders pixels, every frame.
+
+### The completeness guarantee
+
+The toolkit walks the widget tree once and lowers **every** widget to a draw
+command list *and* a semantic node in the same pass, both from one intrinsic
+description (`semantics::build_frame` → [`lower`]). There is no API that paints
+without emitting a node, so for every rendered widget there is exactly one
+semantic node. [`verify_completeness`] checks this for any frame and is asserted
+in the tests:
+
+```rust
+let frame = build_frame("my-app", &root);
+verify_completeness(&frame).unwrap();        // every rendered widget ⇒ a node
+assert_eq!(frame.draws.len(), frame.nodes.len());
+assert_eq!(frame.ak.nodes.len(), frame.nodes.len()); // full AccessKit tree too
+```
+
+This is the structural answer to the *opaque-app* failure mode the `slug-bridge`
+coverage heuristic only flags after the fact.
+
+### UI as data
+
+Widgets are a plain data enum (Button, Label, TextBox, Checkbox, Slider, List,
+Menu, Container) with stable ids; the UI is a pure function of state (Elm-style
+`view`/`update`):
+
+```rust
+fn view(s: &Notes) -> Widget<Msg> {
+    Widget::container(vec![
+        Widget::label("Slug Notes").id("header"),
+        Widget::button("New").id("new").on_press(Msg::NewNote),
+        Widget::textbox("Title", s.title()).id("title").on_input(Msg::SetTitle),
+    ]).id("root")
+}
+```
+
+### High-level tools (WebMCP-style)
+
+Beyond raw widgets, a window registers imperative **tools** (name, description,
+JSON-schema params, handler) — `navigator.modelContext`-style — exported next to
+the widget tree so an agent can act by intent (`create_note`) or by widget
+(`invoke(ref, "set_text")`).
+
+### Bus export + actions
+
+The app serves its semantic tree + tools over a **local Unix socket** and accepts
+`invoke(ref, action)` / `call_tool(name, args)` — the native Slug path (no AT-SPI,
+no screenshots; under the future Slug compositor this rides the Wayland protocol).
+Frames are length-prefixed JSON; the canonical wire schema is also given as
+Cap'n Proto in [`crates/slug-ui/schema/slug_ui.capnp`](./crates/slug-ui/schema/slug_ui.capnp)
+(JSON framing is used now so it drops straight into the serde-based Slug stack).
+
+### Demo: `slug-notes`
+
+```sh
+cargo run -p slug-notes -- /tmp/slug-notes.sock     # serve on a Unix socket
+```
+
+`crates/slug-notes/tests/agent_drive.rs` boots it on a private socket and an
+agent **drives it with zero vision** — snapshot → `create_note` → edit the title
+box by ref → toggle the Pinned checkbox → press *New* → `search_notes` — asserting
+state purely from the exported semantic tree.
+
+### Rendering
+
+The toolkit emits a [`DrawCmd`] stream through a [`Renderer`] trait; the default
+`HeadlessRenderer` records commands (all the tests + the guarantee need). A
+GPU backend (wgpu / Skia) is the same trait — and, crucially, it consumes the
+*same* per-widget lowering, so it cannot draw a node-less widget either.
+
+### App SDK for other languages
+
+Non-Rust apps describe their UI as a JSON spec ([`slug_ui::declarative`]) and get
+the same guarantee, via:
+
+- **C** (`slug-ui-ffi`, cbindgen): `slug_ui_app_new` / `slug_ui_snapshot_json` /
+  `slug_ui_invoke` / `slug_ui_drain_events_json`; header generated to
+  `crates/slug-ui-ffi/include/slug_ui.h`.
+- **Python** (`slug-ui-py`, PyO3):
+
+  ```python
+  import slug_ui, json
+  app  = slug_ui.SlugUiApp(json.dumps(spec))
+  tree = json.loads(app.snapshot())      # complete semantic tree
+  app.invoke(ref, "set_text", "hello")
+  events = json.loads(app.drain_events())
+  ```
 
 ## MCP-native control dashboard
 

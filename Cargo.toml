@@ -6,6 +6,10 @@ members = [
     "crates/slug-mcp",
     "crates/slug-cli",
     "crates/slug-brain",
+    "crates/slug-ui",
+    "crates/slug-notes",
+    "crates/slug-ui-ffi",
+    "crates/slug-ui-py",
 ]
 
 [workspace.package]
@@ -22,6 +26,7 @@ authors = ["Thibault Dufour"]
 slug-core = { path = "crates/slug-core" }
 slug-bridge = { path = "crates/slug-bridge" }
 slug-mcp = { path = "crates/slug-mcp" }
+slug-ui = { path = "crates/slug-ui" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
