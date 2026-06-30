@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" alt="Slug" width="120" height="120"></p>
+
 # Slug
 
 > Created by **Thibault Dufour**.
