@@ -12,8 +12,9 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.77.2"
+description = "Let AI agents drive native desktop apps by reading the OS accessibility tree as text, instead of screenshots."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/dais-heroique/slug"
+repository = "https://github.com/dais-heroique/Slug"
 authors = ["Thibault Dufour"]
 
 [workspace.dependencies]

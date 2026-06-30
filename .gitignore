@@ -7,3 +7,9 @@ secrets.env
 mcp_servers.json
 slug-install/windows/payload/
 dist/
+
+# OS / editor cruft
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
