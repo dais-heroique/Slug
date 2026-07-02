@@ -1,22 +1,19 @@
-//! Bus export over a local Unix socket.
+//! Bus export over a local IPC channel.
 //!
-//! The app serves its semantic tree + tools and accepts `invoke`/`call_tool` from
-//! the bus — the native Slug path: no AT-SPI, no screenshots. Under the future
-//! Slug compositor this rides the Wayland protocol; today a Unix socket means it
-//! works on any session and feeds the Step-1 `slug-bridge`/`slug-bus` directly.
+//! On macOS/Linux a Unix-domain socket is used; on Windows a named pipe.
+//! The app serves its semantic tree + tools and accepts `invoke`/`call_tool`
+//! from the bus — the native Slug path with no AT-SPI, no screenshots.
+//! Frames are length-prefixed JSON; see `protocol.rs`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
-use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 use crate::app::UiRuntime;
-use crate::protocol::{
-    read_frame, write_frame, BusSnapshot, ClientMsg, ServerMsg,
-};
+use crate::protocol::{read_frame, write_frame, BusSnapshot, ClientMsg, ServerMsg};
 
 /// A shared, thread-safe handle to a running app.
 pub type SharedRuntime = Arc<Mutex<Box<dyn UiRuntime>>>;
@@ -26,9 +23,35 @@ pub fn shared(runtime: impl UiRuntime + 'static) -> SharedRuntime {
     Arc::new(Mutex::new(Box::new(runtime)))
 }
 
-/// Serve a runtime on a Unix socket until the listener errors. Removes any stale
-/// socket file first.
+// ── platform stream type ──────────────────────────────────────────────────────
+
+#[cfg(unix)]
+type BusStream = tokio::net::UnixStream;
+
+// On Windows, NamedPipeClient implements AsyncRead + AsyncWrite + Unpin.
+#[cfg(windows)]
+type BusStream = tokio::net::windows::named_pipe::NamedPipeClient;
+
+// ── Windows helper: filesystem path → named-pipe name ────────────────────────
+
+#[cfg(windows)]
+fn to_pipe_name(path: &Path) -> String {
+    // Named pipes live in \\.\pipe\<name>. Derive the name from the last path
+    // component so `/tmp/slug-notes.sock` → `\\.\pipe\slug-notes.sock`.
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("slug-ui");
+    format!(r"\\.\pipe\{name}")
+}
+
+// ── serve ─────────────────────────────────────────────────────────────────────
+
+/// Serve a runtime on the local IPC channel. Runs until the listener errors.
+///
+/// On Unix the `path` argument is the socket file path (any stale file is
+/// removed first). On Windows it is converted to a named-pipe name using
+/// the final path component.
+#[cfg(unix)]
 pub async fn serve(path: impl AsRef<Path>, runtime: SharedRuntime) -> std::io::Result<()> {
+    use tokio::net::UnixListener;
     let path: PathBuf = path.as_ref().to_path_buf();
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
@@ -44,7 +67,33 @@ pub async fn serve(path: impl AsRef<Path>, runtime: SharedRuntime) -> std::io::R
     }
 }
 
-async fn handle_conn(mut stream: UnixStream, runtime: SharedRuntime) -> std::io::Result<()> {
+#[cfg(windows)]
+pub async fn serve(path: impl AsRef<Path>, runtime: SharedRuntime) -> std::io::Result<()> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    let name = to_pipe_name(path.as_ref());
+    debug!(pipe = %name, "slug-ui bus listening");
+    // Create the first server instance before any client tries to connect.
+    let mut server = ServerOptions::new().first_pipe_instance(true).create(&name)?;
+    loop {
+        server.connect().await?;
+        let connected = server;
+        let rt = runtime.clone();
+        tokio::spawn(async move {
+            if let Err(e) = handle_conn(connected, rt).await {
+                debug!(error = %e, "bus connection closed");
+            }
+        });
+        // Prepare the next instance so the pipe is always available.
+        server = ServerOptions::new().create(&name)?;
+    }
+}
+
+// ── connection handler (shared, generic over stream type) ─────────────────────
+
+async fn handle_conn<S>(mut stream: S, runtime: SharedRuntime) -> std::io::Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     while let Some(msg) = read_frame::<_, ClientMsg>(&mut stream).await? {
         let resp = dispatch(&runtime, msg).await;
         write_frame(&mut stream, &resp).await?;
@@ -72,14 +121,24 @@ async fn dispatch(runtime: &SharedRuntime, msg: ClientMsg) -> ServerMsg {
     }
 }
 
+// ── BusClient ─────────────────────────────────────────────────────────────────
+
 /// A minimal client for driving an app over the bus (used by tests and tools).
 pub struct BusClient {
-    stream: UnixStream,
+    stream: BusStream,
 }
 
 impl BusClient {
+    #[cfg(unix)]
     pub async fn connect(path: impl AsRef<Path>) -> std::io::Result<Self> {
-        Ok(BusClient { stream: UnixStream::connect(path).await? })
+        Ok(BusClient { stream: tokio::net::UnixStream::connect(path).await? })
+    }
+
+    #[cfg(windows)]
+    pub async fn connect(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        let name = to_pipe_name(path.as_ref());
+        Ok(BusClient { stream: ClientOptions::new().open(&name)? })
     }
 
     async fn round_trip(&mut self, msg: &ClientMsg) -> std::io::Result<ServerMsg> {
