@@ -667,22 +667,6 @@ dashboard (and sets `SLUG_DESTRUCTIVE=ask`). On Windows use
 - **Deltas.** `SlugDelta` / `SlugEvent` frames carry UI changes in a stable wire
   format, independent of the OS that produced them.
 
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to set up the workspace, run tests, and submit a pull request.
-
-## Security
-
-For responsible disclosure of vulnerabilities, see [SECURITY.md](./SECURITY.md). Do not open a public issue for security reports.
-
-## Code of Conduct
-
-This project follows the [Contributor Covenant Code of Conduct](./CODE_OF_CONDUCT.md). Please read it before participating.
-
-## Changelog
-
-Notable changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
-
 ## Author
 
 **Slug** is created and maintained by **Thibault Dufour**.
